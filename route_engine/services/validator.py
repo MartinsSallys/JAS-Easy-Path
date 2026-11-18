@@ -148,15 +148,25 @@ def validate_problem(raw: object) -> Problem:
             )
         )
 
-    total_capacity = sum(vehicle.capacity for vehicle in vehicles)
-    total_demand = sum(delivery.demand for delivery in deliveries)
-    if total_demand > total_capacity:
-        raise ValidationError(
-            [_error("vehicles", "Capacidade insuficiente para atender a demanda")]
-        )
-
-    return Problem(
+    problem = Problem(
         depot=depot,
         vehicles=tuple(vehicles),
         deliveries=tuple(deliveries),
     )
+
+    if any(delivery.demand > problem.max_capacity for delivery in problem.deliveries):
+        raise ValidationError(
+            [
+                _error(
+                    "deliveries.demand",
+                    "Demanda da entrega excede a capacidade do maior veículo",
+                )
+            ]
+        )
+
+    if problem.total_demand > problem.total_capacity:
+        raise ValidationError(
+            [_error("vehicles", "Capacidade insuficiente para atender a demanda")]
+        )
+
+    return problem

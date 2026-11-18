@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from route_engine.domain.models import Delivery, Depot, Location, Problem, Vehicle
@@ -34,6 +36,12 @@ def assert_invalid(raw: object, expected_field: str) -> None:
         validate_problem(raw)
 
     assert exc_info.value.errors[0]["field"] == expected_field
+
+
+def get_location(raw: dict, section: str) -> dict:
+    if section == "depot":
+        return raw["depot"]["location"]
+    return raw["deliveries"][0]["location"]
 
 
 def test_validate_problem_builds_typed_domain_objects() -> None:
@@ -174,6 +182,96 @@ def test_validates_depot_and_delivery_locations(
     assert_invalid(raw, f"{section}.{expected_field}")
 
 
+@pytest.mark.parametrize("section", ["depot", "deliveries"])
+@pytest.mark.parametrize(
+    ("latitude", "longitude"),
+    [(0, 0), (-90, -180), (90, 180)],
+)
+def test_accepts_zero_and_inclusive_coordinate_bounds(
+    section: str, latitude: float, longitude: float
+) -> None:
+    raw = valid_input()
+    location_data = get_location(raw, section)
+    location_data["latitude"] = latitude
+    location_data["longitude"] = longitude
+
+    problem = validate_problem(raw)
+    location = (
+        problem.depot.location if section == "depot" else problem.deliveries[0].location
+    )
+
+    assert location.latitude == latitude
+    assert location.longitude == longitude
+
+
+@pytest.mark.parametrize("section", ["depot", "deliveries"])
+@pytest.mark.parametrize(
+    ("coordinate", "value"),
+    [
+        ("latitude", math.nextafter(-90.0, -math.inf)),
+        ("latitude", math.nextafter(90.0, math.inf)),
+        ("longitude", math.nextafter(-180.0, -math.inf)),
+        ("longitude", math.nextafter(180.0, math.inf)),
+    ],
+)
+def test_rejects_coordinates_immediately_outside_bounds(
+    section: str, coordinate: str, value: float
+) -> None:
+    raw = valid_input()
+    get_location(raw, section)[coordinate] = value
+
+    assert_invalid(raw, f"{section}.location")
+
+
+@pytest.mark.parametrize("section", ["depot", "deliveries"])
+@pytest.mark.parametrize(
+    ("coordinate", "value"),
+    [
+        ("latitude", math.nan),
+        ("latitude", math.inf),
+        ("latitude", -math.inf),
+        ("longitude", math.nan),
+        ("longitude", math.inf),
+        ("longitude", -math.inf),
+    ],
+)
+def test_rejects_non_finite_coordinates(
+    section: str, coordinate: str, value: float
+) -> None:
+    raw = valid_input()
+    get_location(raw, section)[coordinate] = value
+
+    assert_invalid(raw, f"{section}.location")
+
+
+@pytest.mark.parametrize(
+    ("section", "path", "expected_field"),
+    [
+        ("depot", ("id",), "depot.id"),
+        ("depot", ("location",), "depot.location"),
+        ("depot", ("location", "latitude"), "depot.location"),
+        ("depot", ("location", "longitude"), "depot.location"),
+        ("vehicles", (0, "id"), "vehicles.id"),
+        ("vehicles", (0, "capacity"), "vehicles.capacity"),
+        ("deliveries", (0, "id"), "deliveries.id"),
+        ("deliveries", (0, "demand"), "deliveries.demand"),
+        ("deliveries", (0, "location"), "deliveries.location"),
+        ("deliveries", (0, "location", "latitude"), "deliveries.location"),
+        ("deliveries", (0, "location", "longitude"), "deliveries.location"),
+    ],
+)
+def test_rejects_removed_required_keys(
+    section: str, path: tuple[str | int, ...], expected_field: str
+) -> None:
+    raw = valid_input()
+    target = raw[section]
+    for key in path[:-1]:
+        target = target[key]
+    del target[path[-1]]
+
+    assert_invalid(raw, expected_field)
+
+
 def test_allows_location_without_address() -> None:
     raw = valid_input()
     raw["deliveries"][0]["location"] = {"latitude": -2.91, "longitude": -41.78}
@@ -189,6 +287,113 @@ def test_allows_location_without_address() -> None:
 
 def test_rejects_total_demand_above_total_capacity() -> None:
     raw = valid_input()
-    raw["deliveries"][0]["demand"] = 26
+    raw["vehicles"] = [
+        {"id": 152, "capacity": 8},
+        {"id": 153, "capacity": 6},
+    ]
+    raw["deliveries"] = [
+        {
+            "id": 1,
+            "demand": 8,
+            "location": {"latitude": -2.910, "longitude": -41.780},
+        },
+        {
+            "id": 2,
+            "demand": 7,
+            "location": {"latitude": -2.920, "longitude": -41.790},
+        },
+    ]
 
     assert_invalid(raw, "vehicles")
+
+
+def test_rejects_delivery_demand_above_largest_vehicle_capacity() -> None:
+    raw = valid_input()
+    raw["vehicles"] = [
+        {"id": 152, "capacity": 8},
+        {"id": 153, "capacity": 6},
+    ]
+    raw["deliveries"][0]["demand"] = 9
+
+    with pytest.raises(ValidationError) as exc_info:
+        validate_problem(raw)
+
+    assert exc_info.value.errors == [
+        {
+            "field": "deliveries.demand",
+            "message": "Demanda da entrega excede a capacidade do maior veículo",
+        }
+    ]
+
+
+def test_accepts_delivery_demand_equal_to_largest_vehicle_capacity() -> None:
+    raw = valid_input()
+    raw["vehicles"] = [
+        {"id": 152, "capacity": 8},
+        {"id": 153, "capacity": 6},
+    ]
+    raw["deliveries"][0]["demand"] = 8
+
+    problem = validate_problem(raw)
+
+    assert isinstance(problem, Problem)
+    assert problem.deliveries[0].demand == 8
+    assert problem.max_capacity == 8
+
+
+def test_accepts_multiple_deliveries_within_individual_and_total_capacity() -> None:
+    raw = valid_input()
+    raw["vehicles"] = [
+        {"id": 152, "capacity": 8},
+        {"id": 153, "capacity": 6},
+    ]
+    raw["deliveries"] = [
+        {
+            "id": 1,
+            "demand": 4,
+            "location": {"latitude": -2.910, "longitude": -41.780},
+        },
+        {
+            "id": 2,
+            "demand": 5,
+            "location": {"latitude": -2.920, "longitude": -41.790},
+        },
+        {
+            "id": 3,
+            "demand": 3,
+            "location": {"latitude": -2.930, "longitude": -41.800},
+        },
+    ]
+
+    problem = validate_problem(raw)
+
+    assert isinstance(problem, Problem)
+    assert [delivery.demand for delivery in problem.deliveries] == [4, 5, 3]
+    assert problem.total_demand == 12
+    assert problem.max_capacity == 8
+    assert problem.total_capacity == 14
+
+
+def test_accepts_total_demand_equal_to_total_capacity() -> None:
+    raw = valid_input()
+    raw["vehicles"] = [
+        {"id": 152, "capacity": 10},
+        {"id": 153, "capacity": 15},
+    ]
+    raw["deliveries"] = [
+        {
+            "id": 1,
+            "demand": 10,
+            "location": {"latitude": -2.910, "longitude": -41.780},
+        },
+        {
+            "id": 2,
+            "demand": 15,
+            "location": {"latitude": -2.920, "longitude": -41.790},
+        },
+    ]
+
+    problem = validate_problem(raw)
+
+    assert problem.total_demand == 25
+    assert problem.total_capacity == 25
