@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+/* Marcador numerado do mapa */
+.stop-pin {
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+.stop-pin--done { background: #16a34a; }
+.stop-pin--issue { background: #f97316; }
+.stop-pin--origin { background: #172554; }
