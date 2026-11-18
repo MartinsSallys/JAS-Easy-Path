@@ -1,0 +1,29 @@
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.14,<3.15"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.1.1"
+ruff = "^0.16.5"
+taskipy = "^1.14.1"
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+include = ["*.py", "*.pyi"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["route_engine/tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+
+[tool.taskipy.tasks]
+lint = "ruff check route_engine"
+format = "ruff format route_engine"
+format-check = "ruff format --check route_engine"
+test = "pytest -q"
