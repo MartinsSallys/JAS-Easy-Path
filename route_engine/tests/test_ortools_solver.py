@@ -359,3 +359,74 @@ def test_reports_temporal_impossibility_when_capacity_is_sufficient() -> None:
     result = solve_routes(problem, distance_matrix, duration_matrix)
 
     assert_no_solution_without_overclaiming(result)
+
+
+def test_delivery_windows_change_lowest_distance_feasible_route_order() -> None:
+    operating_hours = ("08:00", "10:00")
+    wide_window_problem = build_problem(
+        vehicle_capacities=[2],
+        demands=[1, 1],
+        operating_hours=operating_hours,
+    )
+    restricted_window_problem = build_problem(
+        vehicle_capacities=[2],
+        demands=[1, 1],
+        operating_hours=operating_hours,
+        time_windows=[None, ("08:05", "08:13")],
+    )
+    distance_matrix = [
+        [0, 100, 500],
+        [500, 0, 100],
+        [100, 500, 0],
+    ]
+    duration_matrix = [
+        [0, 5, 5],
+        [5, 0, 5],
+        [5, 5, 0],
+    ]
+
+    wide_window_result = solve_routes(
+        wide_window_problem,
+        distance_matrix,
+        duration_matrix,
+    )
+    restricted_window_result = solve_routes(
+        restricted_window_problem,
+        distance_matrix,
+        duration_matrix,
+    )
+
+    assert_solution_schedule(
+        wide_window_problem,
+        wide_window_result,
+        distance_matrix,
+        duration_matrix,
+    )
+    assert_solution_schedule(
+        restricted_window_problem,
+        restricted_window_result,
+        distance_matrix,
+        duration_matrix,
+    )
+    assert wide_window_result.total_distance_meters == 300
+    assert restricted_window_result.total_distance_meters == 1500
+
+    wide_window_route = wide_window_result.routes[0]
+    restricted_window_route = restricted_window_result.routes[0]
+    wide_sequence = [
+        point.id for point in wide_window_route.points if point.kind == "delivery"
+    ]
+    restricted_sequence = [
+        point.id for point in restricted_window_route.points if point.kind == "delivery"
+    ]
+    assert wide_sequence == [101, 102]
+    assert restricted_sequence == [102, 101]
+    assert wide_sequence != restricted_sequence
+
+    restricted_delivery_b = next(
+        point
+        for point in restricted_window_route.points
+        if point.kind == "delivery" and point.id == 102
+    )
+    assert restricted_delivery_b.service_start_minute == 8 * 60 + 5
+    assert restricted_delivery_b.service_end_minute == 8 * 60 + 13

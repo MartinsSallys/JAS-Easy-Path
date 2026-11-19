@@ -221,3 +221,20 @@ Os testes de integração temporal com OR-Tools também podem ser executados iso
 ```bash
 poetry run pytest -q route_engine/tests/test_ortools_solver.py
 ```
+
+### Experimento: reordenação por janela
+
+O teste `test_delivery_windows_change_lowest_distance_feasible_route_order` compara
+duas entregas com as mesmas matrizes, veículo, demandas e expediente. Com janelas
+amplas, o solver escolhe depósito → A → B (300 m). Ao restringir B para 08:05–08:13,
+essa sequência deixa de caber: A ocupa 08:05–08:13 e B só poderia começar às 08:18.
+O solver então escolhe depósito → B → A (1.500 m), atendendo B das 08:05 às 08:13.
+As durações são dados manuais sintéticos, independentes da matriz de distâncias. O
+objetivo continua sendo minimizar a distância entre rotas que respeitam todas as
+restrições.
+
+Execute somente esse experimento com:
+
+```bash
+poetry run pytest -q route_engine/tests/test_ortools_solver.py -k delivery_windows_change_lowest_distance_feasible_route_order
+```
