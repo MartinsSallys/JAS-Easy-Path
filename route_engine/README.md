@@ -26,6 +26,7 @@ poetry run task lint          # Ruff no código Python do motor
 poetry run task format        # aplica a formatação Ruff ao motor
 poetry run task format-check  # verifica a formatação sem alterar arquivos
 poetry run task test          # executa os testes descobertos em route_engine/tests
+poetry check --lock           # confere metadados e sincronização do lock
 ```
 
 ## Executar os testes Python
@@ -42,11 +43,11 @@ O pytest descobre os arquivos `test_*.py` em `route_engine/tests/`. O atalho
 ## Solver OR-Tools
 
 O solver usa Google OR-Tools 9.15.6755, instalado como dependência de execução e
-fixado em `poetry.lock`. Ele minimiza a distância total da matriz, atende todas as
-entregas exatamente uma vez e aplica a capacidade individual de cada veículo. Todos
-os veículos começam e terminam no depósito; um veículo sem entregas retorna ao mesmo
-depósito sem percorrer distância. **O solver ainda não aplica expediente ou janelas
-de entrega e não garante que as rotas calculadas sejam temporalmente viáveis.**
+fixado em `poetry.lock`. Ele minimiza a distância total em metros; a matriz de
+duração em minutos impõe as restrições temporais e não acrescenta outro objetivo.
+Todas as entregas são obrigatórias e atendidas uma vez, as capacidades individuais
+são respeitadas e todos os veículos começam e terminam no depósito. Veículos sem
+entregas podem permanecer sem rota e retornam ao depósito sem percorrer distância.
 
 A busca usa `PATH_CHEAPEST_ARC` para criar uma solução inicial e `GUIDED_LOCAL_SEARCH`
 para buscar melhorias, com limite padrão de 1 segundo (`time_limit_seconds` pode ser
@@ -56,13 +57,32 @@ sem solução: somente `ROUTING_INFEASIBLE` é tratado como inviabilidade compro
 `ROUTING_FAIL` e `ROUTING_FAIL_TIMEOUT` indicam busca encerrada sem solução. Sem uma
 atribuição, rotas e distância total vêm como `None`.
 
-O solver não tem dimensão temporal nem matriz de tempos. Ele não considera duração de
-atendimento, espera por abertura de janela ou retorno ao depósito até o fim do
-expediente. A validação dos horários verifica apenas a coerência local do contrato;
-deslocamentos e a sequência das paradas ainda não são avaliados. O exemplo executável
-envia um aviso para `stderr` antes de imprimir o JSON do resultado em `stdout`.
+Na dimensão temporal, cada valor acumulado de uma entrega representa o início do
+atendimento. Esse início precisa estar entre a abertura da janela efetiva e o horário
+de fechamento menos 8 minutos. O tempo de um arco inclui a viagem e, quando sai de
+uma entrega, também os 8 minutos de atendimento; do depósito, inclui somente a
+viagem. A folga da dimensão permite espera suficiente ao longo do expediente. As
+partidas e os retornos ficam entre a abertura e o fechamento do expediente.
 
-O motor ainda não geocodifica endereços nem calcula distâncias rodoviárias.
+O modelo usa os cumulativos e as folgas de uma dimensão de tempo do
+[exemplo oficial de VRPTW](https://developers.google.com/optimization/routing/vrptw)
+e da [documentação de dimensões](https://developers.google.com/optimization/routing/dimensions).
+
+Depois de escolher as rotas por distância, o exemplo reconstrói a programação
+concreta a partir da abertura do expediente. Cada veículo parte nesse horário e cada
+entrega começa no primeiro instante compatível com a viagem e sua janela; uma chegada
+antecipada gera espera antes do atendimento. Essa escolha apresenta um horário viável
+e não altera o objetivo de distância. Os resultados incluem
+`departure_minute` e `return_minute` por veículo e `service_start_minute` e
+`service_end_minute` em cada ponto de entrega. Todos são minutos desde o início do dia
+(`08:00` = 480); os campos de atendimento dos pontos do depósito são `null`. Início de
+atendimento não é horário de chegada física: o veículo pode chegar antes e esperar.
+`solution_found` significa que foi encontrada uma solução viável, não que ela seja
+ótima.
+
+O motor ainda não geocodifica endereços nem calcula distâncias ou durações reais de
+trânsito. O horizonte é um único dia, não há pausas, e a duração de atendimento é
+fixa em 8 minutos.
 
 ## Contrato de expediente e janelas
 
@@ -119,8 +139,8 @@ A janela efetiva é a interseção com o expediente. Por exemplo, expediente
 sem interseção ou com menos de 8 minutos efetivos são rejeitadas; exatamente 8
 minutos é válido. Cada atendimento dura 8 minutos, valor interno e não configurável
 no payload. Produtos são considerados disponíveis e conferidos no início da
-operação. A validação não agenda o atendimento nem prova que uma rota consegue
-respeitar os horários.
+operação. A validação de entrada confere o contrato; a viabilidade da sequência é
+verificada pelo solver temporal.
 
 `Delivery.time_window` armazena somente a janela efetiva em minutos; a janela original
 solicitada não é preservada nesse modelo. Um futuro cadastro que precise exibir ou
@@ -138,31 +158,56 @@ opcionais, então omiti-las mantém o comportamento de herdar o expediente:
 }
 ```
 
-O contrato registra atendimento fixo e janelas, mas o solver ainda não aplica as
-restrições temporais. A próxima integração precisará modelar duração de viagem,
-atendimento de 8 minutos (sem atendimento no depósito), espera por abertura, início e
-término do atendimento dentro da janela, retorno de todos os veículos antes do
-fechamento e operação sem atravessar a meia-noite. Chegar antes da abertura permitirá
-espera; os produtos são considerados disponíveis e conferidos no início do dia. Essas
-regras aprovadas ainda não são verificadas pelas rotas atuais.
+O solver aplica as janelas efetivas, o atendimento fixo de 8 minutos, a espera por
+abertura, as partidas e os retornos dentro do expediente. A operação não atravessa a
+meia-noite. Os produtos são considerados disponíveis e conferidos na abertura; não há
+tempo de carga no depósito.
 
 Após alterar restrições de dependências no `pyproject.toml`, atualize o lock com
 `poetry lock` e revise as mudanças antes de instalá-las.
 
-## Exemplo manual da matriz de distâncias
+## Exemplo manual de distâncias e durações
 
-O cenário reutilizável está em `route_engine/examples/manual_distance_scenario.py`.
-Ele fornece um `Problem` validado e uma matriz manual em metros. A ordem dos pontos
-é `[depósito, *problem.deliveries]`: índice `0` representa o depósito e índice
-`i + 1` representa `problem.deliveries[i]`, sem usar IDs como índices. As
-coordenadas são sintéticas; os valores da matriz não foram calculados a partir delas.
-O teste de referência confere rotas e métricas inseridas manualmente; ele não
-executa nem representa uma saída do solver.
+O cenário em `route_engine/examples/manual_distance_scenario.py` fornece um `Problem`
+validado, uma matriz de distâncias em metros e uma matriz de durações em minutos. As
+duas usam a ordem `[depósito, *problem.deliveries]`: índice `0` representa o depósito
+e índice `i + 1` representa `problem.deliveries[i]`, sem usar IDs como índices. Ambas
+são manuais. As durações são dados sintéticos fornecidos para o experimento; não são
+calculadas a partir dos metros nem representam trânsito real. As coordenadas também
+são sintéticas e não alimentam as matrizes. Cada matriz deve ser quadrada, conter
+inteiros não negativos e ter diagonal zero; assimetria e valores zero fora da diagonal
+são permitidos. Booleanos não são aceitos como inteiros.
 
-Para executar os testes do cenário e do validador de matriz:
+`solve_routes` exige as duas matrizes explicitamente:
+`solve_routes(problem, distance_matrix, duration_matrix)`. O motor não infere minutos
+a partir dos metros.
+
+```text
+Matriz de duração (minutos):
+[
+    [0, 10, 12, 10, 12],
+    [10, 0,  4, 20, 22],
+    [12, 4,  0, 22, 24],
+    [10, 20, 22, 0,  4],
+    [12, 22, 24, 4,  0],
+]
+```
+
+Uma execução real do exemplo com OR-Tools encontrou esta solução:
+
+| Veículo | Entregas na ordem | Carga | Distância | Partida | Atendimentos (início–fim, minuto do dia) | Retorno |
+| --- | --- | ---: | ---: | ---: | --- | ---: |
+| 152 | 101, 102 | 8 | 2.600 m | 480 (08:00) | 101: 490–498; 102: 502–510 | 522 (08:42) |
+| 153 | 103, 104 | 6 | 2.600 m | 480 (08:00) | 103: 490–498; 104: 502–510 | 522 (08:42) |
+
+Distância total: 5.200 metros. O horário de atendimento representa quando o serviço
+começa e termina, não a chegada física. A sequência e os horários vêm do resultado
+do solver; não são uma garantia de optimalidade global.
+
+Para executar os testes dos validadores das duas matrizes:
 
 ```bash
-poetry run pytest -q route_engine/tests/test_distance_matrix.py
+poetry run pytest -q route_engine/tests/test_distance_matrix.py route_engine/tests/test_duration_matrix.py
 ```
 
 Para executar o exemplo real com OR-Tools e imprimir o resultado estruturado:
@@ -171,7 +216,7 @@ Para executar o exemplo real com OR-Tools e imprimir o resultado estruturado:
 poetry run python -m route_engine.examples.solve_manual_scenario
 ```
 
-Os testes de integração do solver também podem ser executados isoladamente:
+Os testes de integração temporal com OR-Tools também podem ser executados isoladamente:
 
 ```bash
 poetry run pytest -q route_engine/tests/test_ortools_solver.py

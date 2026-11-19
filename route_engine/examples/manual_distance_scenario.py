@@ -4,11 +4,13 @@ from route_engine.domain.models import Problem
 from route_engine.services.validator import validate_problem
 
 
-def build_manual_scenario() -> tuple[Problem, list[list[int]]]:
-    """Return a validated Problem and its hand-entered distance matrix.
+def build_manual_scenario() -> tuple[Problem, list[list[int]], list[list[int]]]:
+    """Return a validated Problem and its hand-entered distance and time matrices.
 
     Coordinates are synthetic and valid. Matrix distances are manual values in
-    meters; they are not calculated from those coordinates.
+    meters, and durations are manual values in minutes. Neither matrix is
+    calculated from those coordinates, and durations are not derived from
+    distances.
     """
     problem = validate_problem(
         {
@@ -52,4 +54,11 @@ def build_manual_scenario() -> tuple[Problem, list[list[int]]]:
         [1000, 2000, 2200, 0, 400],
         [1200, 2200, 2400, 400, 0],
     ]
-    return problem, distance_matrix
+    duration_matrix = [
+        [0, 10, 12, 10, 12],
+        [10, 0, 4, 20, 22],
+        [12, 4, 0, 22, 24],
+        [10, 20, 22, 0, 4],
+        [12, 22, 24, 4, 0],
+    ]
+    return problem, distance_matrix, duration_matrix

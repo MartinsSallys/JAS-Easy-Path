@@ -7,7 +7,7 @@ from route_engine.services.validator import ValidationError
 
 
 def test_accepts_manual_scenario_matrix_without_mutating_it() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     original_matrix = [row.copy() for row in matrix]
 
     result = validate_distance_matrix(matrix, problem)
@@ -18,7 +18,7 @@ def test_accepts_manual_scenario_matrix_without_mutating_it() -> None:
 
 
 def test_rejects_incorrect_row_count() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     matrix.pop()
 
     with pytest.raises(ValidationError) as exc_info:
@@ -28,7 +28,7 @@ def test_rejects_incorrect_row_count() -> None:
 
 
 def test_rejects_incorrect_column_count() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     matrix[0].pop()
 
     with pytest.raises(ValidationError) as exc_info:
@@ -38,7 +38,7 @@ def test_rejects_incorrect_column_count() -> None:
 
 
 def test_rejects_rows_with_different_lengths() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     matrix[2].append(500)
 
     with pytest.raises(ValidationError) as exc_info:
@@ -48,7 +48,7 @@ def test_rejects_rows_with_different_lengths() -> None:
 
 
 def test_rejects_non_list_matrix() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
 
     with pytest.raises(ValidationError) as exc_info:
         validate_distance_matrix(tuple(matrix), problem)
@@ -57,7 +57,7 @@ def test_rejects_non_list_matrix() -> None:
 
 
 def test_rejects_non_list_row() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     matrix[2] = tuple(matrix[2])
 
     with pytest.raises(ValidationError) as exc_info:
@@ -68,7 +68,7 @@ def test_rejects_non_list_row() -> None:
 
 @pytest.mark.parametrize("invalid_value", [-1, 1.5, "100", None, True])
 def test_rejects_invalid_distance_values(invalid_value: object) -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     matrix[1][2] = invalid_value
 
     with pytest.raises(ValidationError) as exc_info:
@@ -78,7 +78,7 @@ def test_rejects_invalid_distance_values(invalid_value: object) -> None:
 
 
 def test_rejects_nonzero_diagonal() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     matrix[3][3] = 1
 
     with pytest.raises(ValidationError) as exc_info:
@@ -91,21 +91,21 @@ def test_rejects_nonzero_diagonal() -> None:
 
 
 def test_accepts_asymmetric_matrix() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     matrix[0][1] = 900
 
     assert validate_distance_matrix(matrix, problem) is matrix
 
 
 def test_accepts_zero_off_diagonal() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     matrix[1][2] = 0
 
     assert validate_distance_matrix(matrix, problem) is matrix
 
 
 def test_matrix_indices_follow_delivery_order_not_delivery_ids() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
 
     assert [delivery.id for delivery in problem.deliveries] == [101, 102, 103, 104]
     assert matrix[1][2] == 400  # A to B
@@ -114,7 +114,7 @@ def test_matrix_indices_follow_delivery_order_not_delivery_ids() -> None:
 
 
 def test_manual_reference_routes_match_distance_and_capacity_totals() -> None:
-    problem, matrix = build_manual_scenario()
+    problem, matrix, _ = build_manual_scenario()
     routes = {
         152: [0, 1, 2, 0],
         153: [0, 3, 4, 0],

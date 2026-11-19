@@ -17,6 +17,8 @@ class RoutePoint:
     kind: Literal["depot", "delivery"]
     id: int
     matrix_index: int
+    service_start_minute: int | None = None
+    service_end_minute: int | None = None
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,8 @@ class VehicleRoute:
     points: tuple[RoutePoint, ...]
     load: int
     distance_meters: int
+    departure_minute: int
+    return_minute: int
 
 
 @dataclass(frozen=True)
