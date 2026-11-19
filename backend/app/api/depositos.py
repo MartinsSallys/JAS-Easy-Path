@@ -17,7 +17,7 @@ router = APIRouter(prefix="/depositos", tags=["Depósitos"])
 async def create_deposito(
     deposito: DepositoCreate,
     session: AsyncSession = Depends(get_session),
-):
+) -> DepositoResponse:
     db_deposito = Deposito(**deposito.model_dump())
     session.add(db_deposito)
     await session.commit()
@@ -29,7 +29,7 @@ async def create_deposito(
 async def list_depositos(
     ativo: bool | None = Query(None),
     session: AsyncSession = Depends(get_session),
-):
+) -> list[DepositoResponse]:
     stmt = select(Deposito)
     if ativo is not None:
         stmt = stmt.where(Deposito.ativo == ativo)
@@ -42,7 +42,7 @@ async def list_depositos(
 async def get_deposito(
     deposito_id: int,
     session: AsyncSession = Depends(get_session),
-):
+) -> DepositoResponse:
     deposito = await session.get(Deposito, deposito_id)
     if not deposito:
         raise HTTPException(status_code=404, detail="Depósito não encontrado")
@@ -54,7 +54,7 @@ async def update_deposito(
     deposito_id: int,
     deposito_update: DepositoUpdate,
     session: AsyncSession = Depends(get_session),
-):
+) -> DepositoResponse:
     deposito = await session.get(Deposito, deposito_id)
     if not deposito:
         raise HTTPException(status_code=404, detail="Depósito não encontrado")
@@ -72,7 +72,7 @@ async def update_deposito(
 async def delete_deposito(
     deposito_id: int,
     session: AsyncSession = Depends(get_session),
-):
+) -> None:
     deposito = await session.get(Deposito, deposito_id)
     if not deposito:
         raise HTTPException(status_code=404, detail="Depósito não encontrado")

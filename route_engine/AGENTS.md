@@ -1,8 +1,8 @@
-# Contexto do Projeto — RotaCerta
+# Contexto do Projeto — JAS Easy Path
 
 ## 1. Sobre o projeto
 
-O RotaCerta é um sistema de otimização de rotas logísticas que busca auxiliar empresas na distribuição de entregas, considerando veículos disponíveis, capacidade de carga, localização dos destinos, distância e tempo de deslocamento.
+O JAS Easy Path é um sistema de otimização de rotas logísticas que busca auxiliar empresas na distribuição de entregas, considerando veículos disponíveis, capacidade de carga, localização dos destinos, distância e tempo de deslocamento.
 
 O objetivo é desenvolver um sistema capaz de receber informações operacionais, processá-las e produzir rotas eficientes, respeitando as restrições de cada operação.
 

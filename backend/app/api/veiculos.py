@@ -18,7 +18,7 @@ router = APIRouter(prefix="/veiculos", tags=["Veículos"])
 async def create_veiculo(
     veiculo: VeiculoCreate,
     session: AsyncSession = Depends(get_session),
-):
+) -> VeiculoResponse:
     db_veiculo = Veiculo(**veiculo.model_dump())
     session.add(db_veiculo)
     await session.commit()
@@ -31,7 +31,7 @@ async def list_veiculos(
     ativo: bool | None = Query(None),
     tipo: VeiculoTipo | None = Query(None),
     session: AsyncSession = Depends(get_session),
-):
+) -> list[VeiculoResponse]:
     stmt = select(Veiculo)
     if ativo is not None:
         stmt = stmt.where(Veiculo.ativo == ativo)
@@ -46,7 +46,7 @@ async def list_veiculos(
 async def get_veiculo(
     veiculo_id: int,
     session: AsyncSession = Depends(get_session),
-):
+) -> VeiculoResponse:
     veiculo = await session.get(Veiculo, veiculo_id)
     if not veiculo:
         raise HTTPException(status_code=404, detail="Veículo não encontrado")
@@ -58,7 +58,7 @@ async def update_veiculo(
     veiculo_id: int,
     veiculo_update: VeiculoUpdate,
     session: AsyncSession = Depends(get_session),
-):
+) -> VeiculoResponse:
     veiculo = await session.get(Veiculo, veiculo_id)
     if not veiculo:
         raise HTTPException(status_code=404, detail="Veículo não encontrado")
@@ -76,7 +76,7 @@ async def update_veiculo(
 async def delete_veiculo(
     veiculo_id: int,
     session: AsyncSession = Depends(get_session),
-):
+) -> None:
     veiculo = await session.get(Veiculo, veiculo_id)
     if not veiculo:
         raise HTTPException(status_code=404, detail="Veículo não encontrado")

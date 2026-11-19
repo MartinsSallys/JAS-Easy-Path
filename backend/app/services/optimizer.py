@@ -1,7 +1,5 @@
-from dataclasses import dataclass
-from typing import Optional
-
-from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+import contextlib
+from datetime import time
 
 from app.core.config import settings
 from app.schemas import (
@@ -14,184 +12,165 @@ from app.schemas import (
     StopResult,
 )
 
+try:
+    from route_engine import (
+        Delivery,
+        Depot,
+        Location,
+        Problem,
+        Route,
+        RouteEngine,
+        Solution,
+        SolveStatus,
+        Stop,
+        Vehicle,
+        time_to_minutes,
+    )
+except ImportError:
+    Depot = None
+    Delivery = None
+    Location = None
+    Problem = None
+    RouteEngine = None
+    Solution = None
+    SolveStatus = None
+    Stop = None
+    Vehicle = None
+    time_to_minutes = None
+    Route = None
 
-@dataclass
-class CVRPProblem:
-    distance_matrix: list[list[int]]
-    demands: list[int]
-    vehicle_capacities: list[int]
-    num_vehicles: int
-    depot: int = 0
 
-
-class ORToolsOptimizer:
-    def __init__(self):
-        self.time_limit = settings.ortools_time_limit_seconds
-        self.first_solution_strategy = getattr(
-            routing_enums_pb2.FirstSolutionStrategy,
-            settings.ortools_first_solution_strategy,
+class RouteEngineAdapter:
+    def __init__(self) -> None:
+        if RouteEngine is None:
+            raise RuntimeError("route_engine not available. Install route_engine package.")
+        self.engine = RouteEngine(
+            time_limit_seconds=settings.ortools_time_limit_seconds,
+            first_solution_strategy=settings.ortools_first_solution_strategy,
         )
 
-    def _create_problem(self, request: OptimizationRequest) -> CVRPProblem:
-        all_locations = [request.depot] + [d.location for d in request.deliveries]
-        n = len(all_locations)
-
-        distance_matrix = [[0] * n for _ in range(n)]
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    dist = self._haversine_distance(
-                        all_locations[i].latitude, all_locations[i].longitude,
-                        all_locations[j].latitude, all_locations[j].longitude
-                    )
-                    distance_matrix[i][j] = int(dist * 1000)
-
-        demands = [0] + [d.demand for d in request.deliveries]
-        vehicle_capacities = [v.capacity for v in request.vehicles]
-
-        return CVRPProblem(
-            distance_matrix=distance_matrix,
-            demands=demands,
-            vehicle_capacities=vehicle_capacities,
-            num_vehicles=len(request.vehicles),
-            depot=0,
+    def _to_engine_location(self, loc: OptimizationLocation) -> Location:
+        return Location(
+            latitude=loc.latitude,
+            longitude=loc.longitude,
+            address=loc.address,
         )
 
-    def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        from math import atan2, cos, radians, sin, sqrt
-        R = 6371.0
-        lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-        dlat = lat2 - lat1
-        dlon = lon2 - lon1
-        a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-        c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return R * c
+    def _to_engine_depot(self, depot: OptimizationLocation) -> Depot:
+        return Depot(id=0, location=self._to_engine_location(depot))
 
-    def solve(self, request: OptimizationRequest) -> OptimizationResponse:
-        import time
-        start_time = time.time()
+    def _to_engine_vehicle(self, v: OptimizationVehicle) -> Vehicle:
+        return Vehicle(id=v.id, capacity=v.capacity)
 
-        problem = self._create_problem(request)
-
-        manager = pywrapcp.RoutingIndexManager(
-            len(problem.distance_matrix),
-            problem.num_vehicles,
-            problem.depot,
-        )
-        routing = pywrapcp.RoutingModel(manager)
-
-        def distance_callback(from_index: int, to_index: int) -> int:
-            from_node = manager.IndexToNode(from_index)
-            to_node = manager.IndexToNode(to_index)
-            return problem.distance_matrix[from_node][to_node]
-
-        transit_callback_index = routing.RegisterTransitCallback(distance_callback)
-        routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-
-        def demand_callback(from_index: int) -> int:
-            from_node = manager.IndexToNode(from_index)
-            return problem.demands[from_node]
-
-        demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
-        routing.AddDimensionWithVehicleCapacity(
-            demand_callback_index,
-            0,
-            problem.vehicle_capacities,
-            True,
-            "Capacity",
+    def _to_engine_delivery(self, d: OptimizationDelivery) -> Delivery:
+        tw_start = None
+        tw_end = None
+        if d.time_window_start:
+            with contextlib.suppress(ValueError):
+                tw_start = time.fromisoformat(d.time_window_start)
+        if d.time_window_end:
+            with contextlib.suppress(ValueError):
+                tw_end = time.fromisoformat(d.time_window_end)
+        return Delivery(
+            id=d.id,
+            demand=d.demand,
+            location=self._to_engine_location(d.location),
+            time_window_start=tw_start,
+            time_window_end=tw_end,
+            service_time_min=8,
         )
 
-        search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-        search_parameters.first_solution_strategy = self.first_solution_strategy
-        search_parameters.time_limit.seconds = self.time_limit
-        search_parameters.log_search = False
+    def _to_engine_problem(self, request: OptimizationRequest) -> Problem:
+        work_start = time(8, 0)
+        work_end = time(18, 0)
+        if request.options:
+            pass
 
-        solution = routing.SolveWithParameters(search_parameters)
+        return Problem(
+            depot=self._to_engine_depot(request.depot),
+            vehicles=tuple(self._to_engine_vehicle(v) for v in request.vehicles),
+            deliveries=tuple(self._to_engine_delivery(d) for d in request.deliveries),
+            work_start=work_start,
+            work_end=work_end,
+        )
 
-        solve_time_ms = int((time.time() - start_time) * 1000)
+    def _from_engine_stop(self, stop: Stop, depot_loc: OptimizationLocation) -> StopResult:
+        return StopResult(
+            delivery_id=stop.delivery_id,
+            location=OptimizationLocation(
+                latitude=stop.location.latitude,
+                longitude=stop.location.longitude,
+                address=stop.location.address,
+            ),
+            sequence=stop.sequence,
+            arrival_time=stop.arrival_time.isoformat() if stop.arrival_time else None,
+            departure_time=stop.departure_time.isoformat() if stop.departure_time else None,
+            load_after=max(0, stop.load_after),
+        )
 
-        if not solution:
-            return OptimizationResponse(
-                routes=[],
-                unassigned=request.deliveries,
-                status="infeasible",
-                solve_time_ms=solve_time_ms,
+    def _from_engine_route(
+        self, route: Route, depot_loc: OptimizationLocation
+    ) -> RouteResult:
+        return RouteResult(
+            vehicle_id=route.vehicle_id,
+            stops=[self._from_engine_stop(s, depot_loc) for s in route.stops],
+            total_distance_km=round(route.total_distance_m / 1000, 2),
+            total_duration_min=route.total_duration_min,
+            total_load=route.total_load,
+        )
+
+    def _from_engine_solution(
+        self, solution: Solution, request: OptimizationRequest
+    ) -> OptimizationResponse:
+        unassigned = [
+            OptimizationDelivery(
+                id=d.id,
+                demand=d.demand,
+                location=OptimizationLocation(
+                    latitude=d.location.latitude,
+                    longitude=d.location.longitude,
+                    address=d.location.address,
+                ),
+                time_window_start=(
+                    d.time_window_start.isoformat() if d.time_window_start else None
+                ),
+                time_window_end=(
+                    d.time_window_end.isoformat() if d.time_window_end else None
+                ),
             )
+            for d in solution.unassigned
+        ]
 
-        routes = []
-        unassigned_ids = set(range(len(request.deliveries)))
-
-        for vehicle_idx in range(problem.num_vehicles):
-            index = routing.Start(vehicle_idx)
-            route_stops = []
-            route_distance = 0
-            route_load = 0
-            sequence = 0
-
-            while not routing.IsEnd(index):
-                node = manager.IndexToNode(index)
-                if node == 0:
-                    route_stops.append(StopResult(
-                        delivery_id=None,
-                        location=request.depot,
-                        sequence=sequence,
-                        arrival_time=None,
-                        departure_time=None,
-                        load_after=route_load,
-                    ))
-                else:
-                    delivery_idx = node - 1
-                    delivery = request.deliveries[delivery_idx]
-                    route_load += delivery.demand
-                    unassigned_ids.discard(delivery_idx)
-                    route_stops.append(StopResult(
-                        delivery_id=delivery.id,
-                        location=delivery.location,
-                        sequence=sequence,
-                        arrival_time=None,
-                        departure_time=None,
-                        load_after=route_load,
-                    ))
-                sequence += 1
-                previous_index = index
-                index = solution.Value(routing.NextVar(index))
-                if not routing.IsEnd(index):
-                    route_distance += problem.distance_matrix[manager.IndexToNode(previous_index)][manager.IndexToNode(index)]
-
-            node = manager.IndexToNode(index)
-            if node == 0:
-                route_stops.append(StopResult(
-                    delivery_id=None,
-                    location=request.depot,
-                    sequence=sequence,
-                    arrival_time=None,
-                    departure_time=None,
-                    load_after=0,
-                ))
-
-            if len(route_stops) > 2:
-                routes.append(RouteResult(
-                    vehicle_id=request.vehicles[vehicle_idx].id,
-                    stops=route_stops,
-                    total_distance_km=round(route_distance / 1000, 2),
-                    total_duration_min=int(route_distance / 1000 * 60 / 30),
-                    total_load=route_load,
-                ))
-
-        unassigned = [request.deliveries[i] for i in unassigned_ids]
-
-        status = "optimal"
-        if unassigned and not request.options.allow_unassigned:
-            status = "infeasible"
-        elif unassigned:
-            status = "feasible"
+        status_map = {
+            SolveStatus.OPTIMAL: "optimal",
+            SolveStatus.FEASIBLE: "feasible",
+            SolveStatus.INFEASIBLE: "infeasible",
+            SolveStatus.TIMEOUT: "timeout",
+        }
 
         return OptimizationResponse(
-            routes=routes,
+            routes=[self._from_engine_route(r, request.depot) for r in solution.routes],
             unassigned=unassigned,
-            status=status,
-            solve_time_ms=solve_time_ms,
+            status=status_map.get(solution.status, "unknown"),
+            solve_time_ms=solution.solve_time_ms,
         )
 
+    def solve(self, request: OptimizationRequest) -> OptimizationResponse:
+        problem = self._to_engine_problem(request)
+        solution = self.engine.solve(problem)
+        return self._from_engine_solution(solution, request)
 
-optimizer = ORToolsOptimizer()
+
+_optimizer: "RouteEngineAdapter | None" = None
+
+
+def get_optimizer() -> RouteEngineAdapter:
+    global _optimizer
+    if _optimizer is None:
+        _optimizer = RouteEngineAdapter()
+    return _optimizer
+
+
+def reset_optimizer() -> None:
+    global _optimizer
+    _optimizer = None

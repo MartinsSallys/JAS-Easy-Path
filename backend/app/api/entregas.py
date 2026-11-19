@@ -19,7 +19,7 @@ router = APIRouter(prefix="/entregas", tags=["Entregas"])
 async def create_entrega(
     entrega: EntregaCreate,
     session: AsyncSession = Depends(get_session),
-):
+) -> EntregaResponse:
     db_entrega = Entrega(**entrega.model_dump())
     session.add(db_entrega)
     await session.commit()
@@ -31,7 +31,7 @@ async def create_entrega(
 async def create_entregas_batch(
     batch: EntregaBatchCreate,
     session: AsyncSession = Depends(get_session),
-):
+) -> list[EntregaResponse]:
     db_entregas = [Entrega(**e.model_dump()) for e in batch.entregas]
     session.add_all(db_entregas)
     await session.commit()
@@ -47,7 +47,7 @@ async def list_entregas(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
-):
+) -> list[EntregaResponse]:
     stmt = select(Entrega).order_by(Entrega.created_at.desc())
     if status is not None:
         stmt = stmt.where(Entrega.status == status)
@@ -62,7 +62,7 @@ async def list_entregas(
 async def get_entrega(
     entrega_id: int,
     session: AsyncSession = Depends(get_session),
-):
+) -> EntregaResponse:
     entrega = await session.get(Entrega, entrega_id)
     if not entrega:
         raise HTTPException(status_code=404, detail="Entrega não encontrada")
@@ -74,7 +74,7 @@ async def update_entrega(
     entrega_id: int,
     entrega_update: EntregaUpdate,
     session: AsyncSession = Depends(get_session),
-):
+) -> EntregaResponse:
     entrega = await session.get(Entrega, entrega_id)
     if not entrega:
         raise HTTPException(status_code=404, detail="Entrega não encontrada")
@@ -92,7 +92,7 @@ async def update_entrega(
 async def delete_entrega(
     entrega_id: int,
     session: AsyncSession = Depends(get_session),
-):
+) -> None:
     entrega = await session.get(Entrega, entrega_id)
     if not entrega:
         raise HTTPException(status_code=404, detail="Entrega não encontrada")

@@ -5,7 +5,7 @@ Summary: JAS Easy Path - Backend API
 Requires-Python: >=3.11
 Requires-Dist: fastapi>=0.115.0
 Requires-Dist: uvicorn[standard]>=0.32.0
-Requires-Dist: sqlalchemy>=2.0.30
+Requires-Dist: sqlalchemy[asyncio]>=2.0.30
 Requires-Dist: asyncpg>=0.29.0
 Requires-Dist: alembic>=1.13.0
 Requires-Dist: pydantic>=2.9.0
@@ -14,6 +14,8 @@ Requires-Dist: httpx>=0.27.0
 Requires-Dist: python-dotenv>=1.0.0
 Requires-Dist: ortools>=9.10
 Requires-Dist: tenacity>=8.3.0
+Requires-Dist: greenlet>=3.0
+Requires-Dist: route-engine @ file:///C:/Users/aland/hack-br-rota-certa/route_engine
 Provides-Extra: dev
 Requires-Dist: pytest>=8.3.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"

@@ -23,36 +23,36 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
 
-class EntregaStatus(str, enum.Enum):
-    PENDENTE = "pendente"
-    ATRIBUIDA = "atribuida"
-    EM_ROTA = "em_rota"
-    ENTREGUE = "entregue"
-    FALHA = "falha"
-    CANCELADA = "cancelada"
+class EntregaStatus(enum.StrEnum):
+    PENDENTE = "PENDENTE"
+    ATRIBUIDA = "ATRIBUIDA"
+    EM_ROTA = "EM_ROTA"
+    ENTREGUE = "ENTREGUE"
+    FALHA = "FALHA"
+    CANCELADA = "CANCELADA"
 
 
-class VeiculoTipo(str, enum.Enum):
-    MOTO = "moto"
-    CARRO = "carro"
-    CAMINHAO = "caminhao"
-    VAN = "van"
+class VeiculoTipo(enum.StrEnum):
+    MOTO = "MOTO"
+    CARRO = "CARRO"
+    CAMINHAO = "CAMINHAO"
+    VAN = "VAN"
 
 
-class RotaStatus(str, enum.Enum):
-    RASCUNHO = "rascunho"
-    OTIMIZADA = "otimizada"
-    EM_ANDAMENTO = "em_andamento"
-    CONCLUIDA = "concluida"
-    CANCELADA = "cancelada"
+class RotaStatus(enum.StrEnum):
+    RASCUNHO = "RASCUNHO"
+    OTIMIZADA = "OTIMIZADA"
+    EM_ANDAMENTO = "EM_ANDAMENTO"
+    CONCLUIDA = "CONCLUIDA"
+    CANCELADA = "CANCELADA"
 
 
-class ParadaStatus(str, enum.Enum):
-    PENDENTE = "pendente"
-    EM_ANDAMENTO = "em_andamento"
-    CONCLUIDA = "concluida"
-    FALHA = "falha"
-    PULADA = "puladas"
+class ParadaStatus(enum.StrEnum):
+    PENDENTE = "PENDENTE"
+    EM_ANDAMENTO = "EM_ANDAMENTO"
+    CONCLUIDA = "CONCLUIDA"
+    FALHA = "FALHA"
+    PULADA = "PULADA"
 
 
 class Deposito(Base):
@@ -136,9 +136,15 @@ class Parada(Base):
     __tablename__ = "paradas"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    rota_id: Mapped[int] = mapped_column(ForeignKey("rotas.id"), nullable=False, index=True)
-    entrega_id: Mapped[int | None] = mapped_column(ForeignKey("entregas.id"), nullable=True, index=True)
-    deposito_id: Mapped[int | None] = mapped_column(ForeignKey("depositos.id"), nullable=True)
+    rota_id: Mapped[int] = mapped_column(
+        ForeignKey("rotas.id"), nullable=False, index=True
+    )
+    entrega_id: Mapped[int | None] = mapped_column(
+        ForeignKey("entregas.id"), nullable=True, index=True
+    )
+    deposito_id: Mapped[int | None] = mapped_column(
+        ForeignKey("depositos.id"), nullable=True
+    )
     ordem: Mapped[int] = mapped_column(Integer, nullable=False)
     endereco: Mapped[str] = mapped_column(Text, nullable=False)
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
@@ -149,7 +155,7 @@ class Parada(Base):
     status: Mapped[ParadaStatus] = mapped_column(
         SQLEnum(ParadaStatus), default=ParadaStatus.PENDENTE
     )
-    tempo_servico_min: Mapped[int] = mapped_column(Integer, default=5)
+    tempo_servico_min: Mapped[int] = mapped_column(Integer, default=8)
     chegada_prevista: Mapped[time | None] = mapped_column(Time, nullable=True)
     saida_prevista: Mapped[time | None] = mapped_column(Time, nullable=True)
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)

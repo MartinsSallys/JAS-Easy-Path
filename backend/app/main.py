@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -10,7 +11,7 @@ from app.services import geocoder, matrix_service
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_db()
     yield
     await geocoder.close()
@@ -37,5 +38,5 @@ app.include_router(api_router, prefix=settings.api_prefix)
 
 
 @app.get("/")
-async def root():
+async def root() -> dict:
     return {"message": "JAS Easy Path API", "version": "0.1.0", "docs": "/docs"}

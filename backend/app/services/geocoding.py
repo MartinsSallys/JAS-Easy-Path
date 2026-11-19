@@ -8,9 +8,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 from app.core.config import settings
 from app.schemas import GeocodeResponse, GeocodeResult
 
+AMBIGUITY_CONFIDENCE_THRESHOLD = 0.9
+
 
 class NominatimGeocoder:
-    def __init__(self):
+    def __init__(self) -> None:
         self.base_url = settings.nominatim_base_url
         self.user_agent = settings.nominatim_user_agent
         self.rate_limit = settings.nominatim_rate_limit
@@ -26,14 +28,14 @@ class NominatimGeocoder:
             )
         return self._client
 
-    async def close(self):
+    async def close(self) -> None:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
 
     def _cache_key(self, address: str) -> str:
         return hashlib.sha256(address.lower().strip().encode()).hexdigest()
 
-    async def _rate_limit(self):
+    async def _rate_limit(self) -> None:
         elapsed = time.time() - self._last_request
         min_interval = 1.0 / self.rate_limit
         if elapsed < min_interval:
@@ -69,7 +71,11 @@ class NominatimGeocoder:
                             "house_number": address.get("house_number"),
                             "neighbourhood": address.get("neighbourhood"),
                             "suburb": address.get("suburb"),
-                            "city": address.get("city") or address.get("town") or address.get("village"),
+                            "city": (
+                                address.get("city")
+                                or address.get("town")
+                                or address.get("village")
+                            ),
                             "state": address.get("state"),
                             "postcode": address.get("postcode"),
                             "country": address.get("country"),
@@ -109,7 +115,9 @@ class NominatimGeocoder:
 
         data = await self._request("/search", params)
         results = self._parse_results(data)
-        ambiguous = len(results) > 1 and results[0].confidence < 0.9
+        ambiguous = (
+            len(results) > 1 and results[0].confidence < AMBIGUITY_CONFIDENCE_THRESHOLD
+        )
 
         response = GeocodeResponse(results=results, ambiguous=ambiguous)
         self._cache[cache_key] = response
@@ -134,7 +142,9 @@ class NominatimGeocoder:
             return results[0]
         raise ValueError("No results found for coordinates")
 
-    async def batch_geocode(self, addresses: list[str], country_code: str = "br") -> list[GeocodeResponse]:
+    async def batch_geocode(
+        self, addresses: list[str], country_code: str = "br"
+    ) -> list[GeocodeResponse]:
         results = []
         for address in addresses:
             try:

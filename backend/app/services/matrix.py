@@ -1,5 +1,7 @@
+import asyncio
 import hashlib
 import json
+import time
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential_jitter
@@ -7,9 +9,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 from app.core.config import settings
 from app.schemas import MatrixResponse
 
+RATE_LIMIT_WINDOW_SECONDS = 60
+
 
 class MatrixService:
-    def __init__(self):
+    def __init__(self) -> None:
         self.base_url = settings.ors_base_url
         self.api_key = settings.ors_api_key
         self.rate_limit = settings.ors_rate_limit
@@ -29,7 +33,7 @@ class MatrixService:
             )
         return self._client
 
-    async def close(self):
+    async def close(self) -> None:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
 
@@ -41,14 +45,14 @@ class MatrixService:
         }
         return hashlib.sha256(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
 
-    async def _rate_limit(self):
-        import time
+    async def _rate_limit(self) -> None:
         now = time.time()
-        self._request_times = [t for t in self._request_times if now - t < 60]
+        self._request_times = [
+            t for t in self._request_times if now - t < RATE_LIMIT_WINDOW_SECONDS
+        ]
         if len(self._request_times) >= self.rate_limit:
-            wait_time = 60 - (now - self._request_times[0])
+            wait_time = RATE_LIMIT_WINDOW_SECONDS - (now - self._request_times[0])
             if wait_time > 0:
-                import asyncio
                 await asyncio.sleep(wait_time)
         self._request_times.append(time.time())
 
@@ -56,7 +60,9 @@ class MatrixService:
         wait=wait_exponential_jitter(initial=1, max=10),
         stop=stop_after_attempt(3),
     )
-    async def _request_matrix(self, locations: list[dict], profile: str, metrics: list[str]) -> dict:
+    async def _request_matrix(
+        self, locations: list[dict], profile: str, metrics: list[str]
+    ) -> dict:
         await self._rate_limit()
         client = await self._get_client()
 
@@ -64,7 +70,7 @@ class MatrixService:
         payload = {
             "locations": coords,
             "metrics": metrics,
-            "units": "km",
+            "units": "m",
         }
 
         url = f"{self.base_url}/v2/matrix/{profile}"
@@ -76,16 +82,28 @@ class MatrixService:
         distances = data.get("distances", [])
         durations = data.get("durations", [])
 
-        distances_km = []
-        durations_min = []
+        distances_km: list[list[float | None]] = []
+        durations_min: list[list[float | None]] = []
 
         if "distance" in metrics:
             for row in distances:
-                distances_km.append([round(d / 1000, 3) if d else 0.0 for d in row])
+                parsed_row: list[float | None] = []
+                for d in row:
+                    if d is None:
+                        parsed_row.append(None)
+                    else:
+                        parsed_row.append(round(d / 1000.0, 3))
+                distances_km.append(parsed_row)
 
         if "duration" in metrics:
             for row in durations:
-                durations_min.append([round(d / 60, 1) if d else 0.0 for d in row])
+                parsed_row: list[float | None] = []
+                for d in row:
+                    if d is None:
+                        parsed_row.append(None)
+                    else:
+                        parsed_row.append(round(d / 60.0, 1))
+                durations_min.append(parsed_row)
 
         return MatrixResponse(
             distances_km=distances_km if distances_km else [[]],
@@ -130,21 +148,46 @@ class MatrixService:
         if metrics is None:
             metrics = ["distance", "duration"]
 
-        if len(locations) <= self.max_locations:
+        n = len(locations)
+        if n <= self.max_locations:
             return await self.get_matrix(locations, metrics, profile)
 
-        all_distances = []
-        all_durations = []
+        full_distances: list[list[float | None]] = [[None] * n for _ in range(n)]
+        full_durations: list[list[float | None]] = [[None] * n for _ in range(n)]
 
-        for i in range(0, len(locations), self.max_locations):
-            chunk = locations[i:i + self.max_locations]
-            result = await self.get_matrix(chunk, metrics, profile)
-            all_distances.extend(result.distances_km)
-            all_durations.extend(result.durations_min)
+        for i in range(0, n, self.max_locations):
+            for j in range(0, n, self.max_locations):
+                chunk_locs = (
+                    locations[i : i + self.max_locations]
+                    + locations[j : j + self.max_locations]
+                )
+                if i == j:
+                    chunk_result = await self.get_matrix(chunk_locs, metrics, profile)
+                    chunk_size = len(locations[i : i + self.max_locations])
+                    for r in range(chunk_size):
+                        for c in range(chunk_size):
+                            full_distances[i + r][j + c] = (
+                                chunk_result.distances_km[r][c]
+                            )
+                            full_durations[i + r][j + c] = (
+                                chunk_result.durations_min[r][c]
+                            )
+                else:
+                    chunk_result = await self.get_matrix(chunk_locs, metrics, profile)
+                    chunk_i_size = len(locations[i : i + self.max_locations])
+                    chunk_j_size = len(locations[j : j + self.max_locations])
+                    for r in range(chunk_i_size):
+                        for c in range(chunk_j_size):
+                            full_distances[i + r][j + c] = (
+                                chunk_result.distances_km[r][chunk_i_size + c]
+                            )
+                            full_durations[i + r][j + c] = (
+                                chunk_result.durations_min[r][chunk_i_size + c]
+                            )
 
         return MatrixResponse(
-            distances_km=all_distances,
-            durations_min=all_durations,
+            distances_km=full_distances,
+            durations_min=full_durations,
             provider="openrouteservice",
             cached=False,
         )

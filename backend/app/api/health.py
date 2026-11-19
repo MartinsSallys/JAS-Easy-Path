@@ -9,14 +9,17 @@ router = APIRouter(prefix="", tags=["Health"])
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check():
+async def health_check() -> HealthResponse:
     return HealthResponse(status="healthy")
 
 
 @router.get("/health/ready")
-async def readiness_check(session: AsyncSession = Depends(get_session)):
+async def readiness_check(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
     try:
         await session.execute(text("SELECT 1"))
-        return {"status": "ready", "database": "connected"}
     except Exception as e:
         return {"status": "not_ready", "database": "disconnected", "error": str(e)}
+    else:
+        return {"status": "ready", "database": "connected"}

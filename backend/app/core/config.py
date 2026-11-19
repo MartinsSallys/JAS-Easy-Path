@@ -2,7 +2,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     # App
     app_name: str = "JAS Easy Path API"
@@ -13,12 +15,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/rotacerta"
     database_echo: bool = False
 
-    # Geocoding (Nominatim)
+    # Geocoding - Nominatim
     nominatim_base_url: str = "https://nominatim.openstreetmap.org"
     nominatim_user_agent: str = "jas-easy-path/1.0"
     nominatim_rate_limit: float = 1.0  # requests per second
 
-    # Matrix (OpenRouteService)
+    # Matrix - OpenRouteService
     ors_base_url: str = "https://api.openrouteservice.org"
     ors_api_key: str = ""  # Set in .env
     ors_rate_limit: int = 40  # requests per minute

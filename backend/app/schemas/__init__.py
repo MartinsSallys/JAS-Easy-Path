@@ -1,40 +1,39 @@
 from datetime import date, datetime, time
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class EntregaStatus(str, Enum):
-    PENDENTE = "pendente"
-    ATRIBUIDA = "atribuida"
-    EM_ROTA = "em_rota"
-    ENTREGUE = "entregue"
-    FALHA = "falha"
-    CANCELADA = "cancelada"
+class EntregaStatus(StrEnum):
+    PENDENTE = "PENDENTE"
+    ATRIBUIDA = "ATRIBUIDA"
+    EM_ROTA = "EM_ROTA"
+    ENTREGUE = "ENTREGUE"
+    FALHA = "FALHA"
+    CANCELADA = "CANCELADA"
 
 
-class VeiculoTipo(str, Enum):
-    MOTO = "moto"
-    CARRO = "carro"
-    CAMINHAO = "caminhao"
-    VAN = "van"
+class VeiculoTipo(StrEnum):
+    MOTO = "MOTO"
+    CARRO = "CARRO"
+    CAMINHAO = "CAMINHAO"
+    VAN = "VAN"
 
 
-class RotaStatus(str, Enum):
-    RASCUNHO = "rascunho"
-    OTIMIZADA = "otimizada"
-    EM_ANDAMENTO = "em_andamento"
-    CONCLUIDA = "concluida"
-    CANCELADA = "cancelada"
+class RotaStatus(StrEnum):
+    RASCUNHO = "RASCUNHO"
+    OTIMIZADA = "OTIMIZADA"
+    EM_ANDAMENTO = "EM_ANDAMENTO"
+    CONCLUIDA = "CONCLUIDA"
+    CANCELADA = "CANCELADA"
 
 
-class ParadaStatus(str, Enum):
-    PENDENTE = "pendente"
-    EM_ANDAMENTO = "em_andamento"
-    CONCLUIDA = "concluida"
-    FALHA = "falha"
-    PULADA = "puladas"
+class ParadaStatus(StrEnum):
+    PENDENTE = "PENDENTE"
+    EM_ANDAMENTO = "EM_ANDAMENTO"
+    CONCLUIDA = "CONCLUIDA"
+    FALHA = "FALHA"
+    PULADA = "PULADA"
 
 
 # --- Deposito Schemas ---
@@ -143,7 +142,7 @@ class ParadaBase(BaseModel):
     demanda: int = Field(default=0, ge=0)
     janela_inicio: time | None = None
     janela_fim: time | None = None
-    tempo_servico_min: int = Field(default=5, ge=0)
+    tempo_servico_min: int = Field(default=8, ge=0)
     chegada_prevista: time | None = None
     saida_prevista: time | None = None
     observacoes: str | None = None
@@ -231,14 +230,14 @@ class ReverseGeocodeRequest(BaseModel):
 
 # --- Matrix Schemas ---
 class MatrixRequest(BaseModel):
-    locations: list[dict] = Field(..., min_length=2)  # [{"latitude": float, "longitude": float}, ...]
+    locations: list[dict] = Field(..., min_length=2)
     metrics: list[str] = Field(default=["distance", "duration"])
     profile: str = "driving-car"
 
 
 class MatrixResponse(BaseModel):
-    distances_km: list[list[float]]
-    durations_min: list[list[float]]
+    distances_km: list[list[float | None]]
+    durations_min: list[list[float | None]]
     provider: str
     cached: bool = False
 
@@ -259,7 +258,7 @@ class OptimizationDelivery(BaseModel):
     id: int
     demand: int
     location: OptimizationLocation
-    time_window_start: str | None = None  # HH:MM:SS
+    time_window_start: str | None = None
     time_window_end: str | None = None
 
 
@@ -290,7 +289,7 @@ class RouteResult(BaseModel):
 class OptimizationResponse(BaseModel):
     routes: list[RouteResult]
     unassigned: list[OptimizationDelivery] = []
-    status: str  # "optimal", "feasible", "infeasible", "timeout"
+    status: str
     solve_time_ms: int
 
 

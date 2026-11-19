@@ -16,6 +16,7 @@ dependencies = [
     "ortools>=9.10",
     "tenacity>=8.3.0",
     "greenlet>=3.0",
+    "route-engine @ file:///C:/Users/aland/hack-br-rota-certa/route_engine",
 ]
 
 [project.optional-dependencies]

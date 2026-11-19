@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -15,7 +15,7 @@ from app.schemas import (
     RotaUpdate,
     RotaWithParadasResponse,
 )
-from app.services import optimizer
+from app.services import get_optimizer
 from app.services.optimizer import (
     OptimizationDelivery,
     OptimizationLocation,
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/rotas", tags=["Rotas"])
 async def create_rota(
     rota: RotaCreate,
     session: AsyncSession = Depends(get_session),
-):
+) -> RotaResponse:
     deposito = await session.get(Deposito, rota.deposito_id)
     if not deposito:
         raise HTTPException(status_code=404, detail="Depósito não encontrado")
@@ -46,7 +46,9 @@ async def create_rota(
         )
         entregas_list = list(entregas.scalars().all())
         if len(entregas_list) != len(rota.entrega_ids):
-            raise HTTPException(status_code=404, detail="Uma ou mais entregas não encontradas")
+            raise HTTPException(
+                status_code=404, detail="Uma ou mais entregas não encontradas"
+            )
 
     db_rota = Rota(
         nome=rota.nome,
@@ -73,10 +75,9 @@ async def list_rotas(
     status: RotaStatus | None = Query(None),
     veiculo_id: int | None = Query(None),
     session: AsyncSession = Depends(get_session),
-):
+) -> list[RotaResponse]:
     stmt = select(Rota).order_by(Rota.data.desc(), Rota.created_at.desc())
     if data:
-        from datetime import date
         stmt = stmt.where(Rota.data == date.fromisoformat(data))
     if status is not None:
         stmt = stmt.where(Rota.status == status)
@@ -90,7 +91,7 @@ async def list_rotas(
 async def get_rota(
     rota_id: int,
     session: AsyncSession = Depends(get_session),
-):
+) -> RotaWithParadasResponse:
     stmt = (
         select(Rota)
         .options(selectinload(Rota.paradas), selectinload(Rota.entregas))
@@ -108,7 +109,7 @@ async def update_rota(
     rota_id: int,
     rota_update: RotaUpdate,
     session: AsyncSession = Depends(get_session),
-):
+) -> RotaResponse:
     rota = await session.get(Rota, rota_id)
     if not rota:
         raise HTTPException(status_code=404, detail="Rota não encontrada")
@@ -127,10 +128,14 @@ async def otimizar_rota(
     rota_id: int,
     optimize_req: RotaOptimizeRequest,
     session: AsyncSession = Depends(get_session),
-):
+) -> RotaWithParadasResponse:
     stmt = (
         select(Rota)
-        .options(selectinload(Rota.entregas), selectinload(Rota.deposito), selectinload(Rota.veiculo))
+        .options(
+            selectinload(Rota.entregas),
+            selectinload(Rota.deposito),
+            selectinload(Rota.veiculo),
+        )
         .where(Rota.id == rota_id)
     )
     result = await session.execute(stmt)
@@ -139,10 +144,14 @@ async def otimizar_rota(
         raise HTTPException(status_code=404, detail="Rota não encontrada")
 
     if not rota.entregas:
-        raise HTTPException(status_code=400, detail="Rota não possui entregas para otimizar")
+        raise HTTPException(
+            status_code=400, detail="Rota não possui entregas para otimizar"
+        )
 
     if not rota.veiculo:
-        raise HTTPException(status_code=400, detail="Rota não possui veículo atribuído")
+        raise HTTPException(
+            status_code=400, detail="Rota não possui veículo atribuído"
+        )
 
     depot_loc = OptimizationLocation(
         latitude=rota.deposito.latitude,
@@ -152,9 +161,8 @@ async def otimizar_rota(
 
     vehicles = [OptimizationVehicle(id=rota.veiculo.id, capacity=rota.veiculo.capacidade)]
 
-    deliveries = []
-    for entrega in rota.entregas:
-        deliveries.append(OptimizationDelivery(
+    deliveries = [
+        OptimizationDelivery(
             id=entrega.id,
             demand=entrega.demanda,
             location=OptimizationLocation(
@@ -162,9 +170,15 @@ async def otimizar_rota(
                 longitude=entrega.longitude,
                 address=entrega.endereco,
             ),
-            time_window_start=entrega.janela_inicio.isoformat() if entrega.janela_inicio else None,
-            time_window_end=entrega.janela_fim.isoformat() if entrega.janela_fim else None,
-        ))
+            time_window_start=(
+                entrega.janela_inicio.isoformat() if entrega.janela_inicio else None
+            ),
+            time_window_end=(
+                entrega.janela_fim.isoformat() if entrega.janela_fim else None
+            ),
+        )
+        for entrega in rota.entregas
+    ]
 
     opt_request = OptimizationRequest(
         depot=depot_loc,
@@ -173,7 +187,7 @@ async def otimizar_rota(
         options=optimize_req,
     )
 
-    opt_response = optimizer.solve(opt_request)
+    opt_response = get_optimizer().solve(opt_request)
 
     if opt_response.status == "infeasible":
         raise HTTPException(
@@ -187,6 +201,12 @@ async def otimizar_rota(
 
     for route_result in opt_response.routes:
         for stop in route_result.stops:
+            if stop.delivery_id is None:
+                demanda_parada = 0
+            else:
+                entrega = await session.get(Entrega, stop.delivery_id)
+                demanda_parada = entrega.demanda if entrega else 0
+
             parada = Parada(
                 rota_id=rota.id,
                 entrega_id=stop.delivery_id,
@@ -195,8 +215,8 @@ async def otimizar_rota(
                 endereco=stop.location.address or "",
                 latitude=stop.location.latitude,
                 longitude=stop.location.longitude,
-                demanda=stop.load_after - (route_result.stops[stop.sequence - 1].load_after if stop.sequence > 0 else 0),
-                tempo_servico_min=5,
+                demanda=demanda_parada,
+                tempo_servico_min=8,
                 status="pendente",
             )
             session.add(parada)
@@ -229,14 +249,11 @@ async def otimizar_rota(
 async def delete_rota(
     rota_id: int,
     session: AsyncSession = Depends(get_session),
-):
+) -> None:
     rota = await session.get(Rota, rota_id)
     if not rota:
         raise HTTPException(status_code=404, detail="Rota não encontrada")
 
-    await session.execute(
-        select(Entrega).where(Entrega.rota_id == rota_id)
-    )
     entregas = await session.execute(
         select(Entrega).where(Entrega.rota_id == rota_id)
     )
@@ -253,7 +270,7 @@ async def delete_rota(
 async def get_rota_mapa(
     rota_id: int,
     session: AsyncSession = Depends(get_session),
-):
+) -> dict:
     stmt = (
         select(Rota)
         .options(selectinload(Rota.paradas))
@@ -264,9 +281,8 @@ async def get_rota_mapa(
     if not rota:
         raise HTTPException(status_code=404, detail="Rota não encontrada")
 
-    features = []
-    for parada in sorted(rota.paradas, key=lambda p: p.ordem):
-        features.append({
+    features = [
+        {
             "type": "Feature",
             "geometry": {
                 "type": "Point",
@@ -279,21 +295,28 @@ async def get_rota_mapa(
                 "entrega_id": parada.entrega_id,
                 "status": parada.status.value,
             },
-        })
+        }
+        for parada in sorted(rota.paradas, key=lambda p: p.ordem)
+    ]
 
-    coordinates = [[p.longitude, p.latitude] for p in sorted(rota.paradas, key=lambda p: p.ordem)]
-    features.append({
-        "type": "Feature",
-        "geometry": {
-            "type": "LineString",
-            "coordinates": coordinates,
-        },
-        "properties": {
-            "rota_id": rota.id,
-            "distancia_km": rota.distancia_total_km,
-            "tempo_min": rota.tempo_total_min,
-        },
-    })
+    coordinates = [
+        [p.longitude, p.latitude]
+        for p in sorted(rota.paradas, key=lambda p: p.ordem)
+    ]
+    features.append(
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": coordinates,
+            },
+            "properties": {
+                "rota_id": rota.id,
+                "distancia_km": rota.distancia_total_km,
+                "tempo_min": rota.tempo_total_min,
+            },
+        }
+    )
 
     return {
         "type": "FeatureCollection",
