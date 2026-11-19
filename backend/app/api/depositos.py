@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +18,7 @@ router = APIRouter(prefix="/depositos", tags=["Depósitos"])
 @router.post("", response_model=DepositoResponse, status_code=status.HTTP_201_CREATED)
 async def create_deposito(
     deposito: DepositoCreate,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DepositoResponse:
     db_deposito = Deposito(**deposito.model_dump())
     session.add(db_deposito)
@@ -27,8 +29,8 @@ async def create_deposito(
 
 @router.get("", response_model=list[DepositoResponse])
 async def list_depositos(
-    ativo: bool | None = Query(None),
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ativo: Annotated[bool | None, Query()] = None,
 ) -> list[DepositoResponse]:
     stmt = select(Deposito)
     if ativo is not None:
@@ -41,7 +43,7 @@ async def list_depositos(
 @router.get("/{deposito_id}", response_model=DepositoResponse)
 async def get_deposito(
     deposito_id: int,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DepositoResponse:
     deposito = await session.get(Deposito, deposito_id)
     if not deposito:
@@ -53,7 +55,7 @@ async def get_deposito(
 async def update_deposito(
     deposito_id: int,
     deposito_update: DepositoUpdate,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DepositoResponse:
     deposito = await session.get(Deposito, deposito_id)
     if not deposito:
@@ -71,7 +73,7 @@ async def update_deposito(
 @router.delete("/{deposito_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_deposito(
     deposito_id: int,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     deposito = await session.get(Deposito, deposito_id)
     if not deposito:

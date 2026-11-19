@@ -78,32 +78,67 @@ class MatrixService:
         response.raise_for_status()
         return response.json()
 
-    def _parse_response(self, data: dict, metrics: list[str]) -> MatrixResponse:
+    def _validate_response(self, data: dict, metrics: list[str]) -> tuple[str, list, list]:
         distances = data.get("distances", [])
         durations = data.get("durations", [])
+
+        if not distances and "distance" in metrics:
+            raise ValueError("ORS response missing 'distances' field")
+        if not durations and "duration" in metrics:
+            raise ValueError("ORS response missing 'durations' field")
+
+        metadata = data.get("metadata", {})
+        units = metadata.get("units", "m")
+        if units not in ("m", "km"):
+            raise ValueError(f"Unknown unit from ORS: {units}")
+
+        return units, distances, durations
+
+    def _parse_distance_row(self, row: list, units: str) -> list[float | None]:
+        parsed_row: list[float | None] = []
+        for d in row:
+            if d is None:
+                parsed_row.append(None)
+            elif units == "km":
+                parsed_row.append(round(d, 3))
+            else:
+                parsed_row.append(round(d / 1000.0, 3))
+        return parsed_row
+
+    def _parse_duration_row(self, row: list) -> list[float | None]:
+        parsed_row: list[float | None] = []
+        for d in row:
+            if d is None:
+                parsed_row.append(None)
+            else:
+                parsed_row.append(round(d / 60.0, 1))
+        return parsed_row
+
+    def _ensure_zero_diagonal(self, matrix: list[list[float | None]]) -> None:
+        for i in range(len(matrix)):
+            if matrix[i][i] is None or matrix[i][i] != 0:
+                matrix[i][i] = 0.0
+
+    def _parse_response(self, data: dict, metrics: list[str]) -> MatrixResponse:
+        units, distances, durations = self._validate_response(data, metrics)
 
         distances_km: list[list[float | None]] = []
         durations_min: list[list[float | None]] = []
 
         if "distance" in metrics:
-            for row in distances:
-                parsed_row: list[float | None] = []
-                for d in row:
-                    if d is None:
-                        parsed_row.append(None)
-                    else:
-                        parsed_row.append(round(d / 1000.0, 3))
-                distances_km.append(parsed_row)
+            distances_km.extend(
+                self._parse_distance_row(row, units) for row in distances
+            )
 
         if "duration" in metrics:
-            for row in durations:
-                parsed_row: list[float | None] = []
-                for d in row:
-                    if d is None:
-                        parsed_row.append(None)
-                    else:
-                        parsed_row.append(round(d / 60.0, 1))
-                durations_min.append(parsed_row)
+            durations_min.extend(
+                self._parse_duration_row(row) for row in durations
+            )
+
+        if distances_km:
+            self._ensure_zero_diagonal(distances_km)
+        if durations_min:
+            self._ensure_zero_diagonal(durations_min)
 
         return MatrixResponse(
             distances_km=distances_km if distances_km else [[]],
@@ -139,6 +174,59 @@ class MatrixService:
         self._cache[cache_key] = response
         return response
 
+    def _init_full_matrices(self, n: int) -> tuple[list, list]:
+        return ([[None] * n for _ in range(n)], [[None] * n for _ in range(n)])
+
+    def _compute_chunk_bounds(self, n: int) -> list[tuple[int, int]]:
+        return [(i, min(i + self.max_locations, n)) for i in range(0, n, self.max_locations)]
+
+    async def _fill_chunk_block(  # noqa: PLR0913, PLR0917
+        self,
+        full_distances: list,
+        full_durations: list,
+        chunk_result: MatrixResponse,
+        i_start: int,
+        i_end: int,
+        j_start: int,
+        j_end: int,
+    ) -> None:
+        chunk_i_size = i_end - i_start
+        chunk_j_size = j_end - j_start
+
+        for r in range(chunk_i_size):
+            for c in range(chunk_j_size):
+                full_distances[i_start + r][j_start + c] = (
+                    chunk_result.distances_km[r][chunk_i_size + c]
+                )
+                full_durations[i_start + r][j_start + c] = (
+                    chunk_result.durations_min[r][chunk_i_size + c]
+                )
+        for r in range(chunk_j_size):
+            for c in range(chunk_i_size):
+                full_distances[j_start + r][i_start + c] = (
+                    chunk_result.distances_km[chunk_i_size + r][c]
+                )
+                full_durations[j_start + r][i_start + c] = (
+                    chunk_result.durations_min[chunk_i_size + r][c]
+                )
+
+    async def _fill_diagonal_block(
+        self,
+        full_distances: list,
+        full_durations: list,
+        chunk_result: MatrixResponse,
+        i_start: int,
+        chunk_size: int,
+    ) -> None:
+        for r in range(chunk_size):
+            for c in range(chunk_size):
+                full_distances[i_start + r][i_start + c] = (
+                    chunk_result.distances_km[r][c]
+                )
+                full_durations[i_start + r][i_start + c] = (
+                    chunk_result.durations_min[r][c]
+                )
+
     async def get_matrix_chunked(
         self,
         locations: list[dict],
@@ -152,38 +240,28 @@ class MatrixService:
         if n <= self.max_locations:
             return await self.get_matrix(locations, metrics, profile)
 
-        full_distances: list[list[float | None]] = [[None] * n for _ in range(n)]
-        full_durations: list[list[float | None]] = [[None] * n for _ in range(n)]
+        full_distances, full_durations = self._init_full_matrices(n)
+        chunk_bounds = self._compute_chunk_bounds(n)
 
-        for i in range(0, n, self.max_locations):
-            for j in range(0, n, self.max_locations):
-                chunk_locs = (
-                    locations[i : i + self.max_locations]
-                    + locations[j : j + self.max_locations]
-                )
-                if i == j:
-                    chunk_result = await self.get_matrix(chunk_locs, metrics, profile)
-                    chunk_size = len(locations[i : i + self.max_locations])
-                    for r in range(chunk_size):
-                        for c in range(chunk_size):
-                            full_distances[i + r][j + c] = (
-                                chunk_result.distances_km[r][c]
-                            )
-                            full_durations[i + r][j + c] = (
-                                chunk_result.durations_min[r][c]
-                            )
+        for i_start, i_end in chunk_bounds:
+            for j_start, j_end in chunk_bounds:
+                chunk_locs = locations[i_start:i_end] + locations[j_start:j_end]
+                chunk_result = await self.get_matrix(chunk_locs, metrics, profile)
+
+                if i_start == j_start:
+                    await self._fill_diagonal_block(
+                        full_distances, full_durations, chunk_result,
+                        i_start, i_end - i_start
+                    )
                 else:
-                    chunk_result = await self.get_matrix(chunk_locs, metrics, profile)
-                    chunk_i_size = len(locations[i : i + self.max_locations])
-                    chunk_j_size = len(locations[j : j + self.max_locations])
-                    for r in range(chunk_i_size):
-                        for c in range(chunk_j_size):
-                            full_distances[i + r][j + c] = (
-                                chunk_result.distances_km[r][chunk_i_size + c]
-                            )
-                            full_durations[i + r][j + c] = (
-                                chunk_result.durations_min[r][chunk_i_size + c]
-                            )
+                    await self._fill_chunk_block(
+                        full_distances, full_durations, chunk_result,
+                        i_start, i_end, j_start, j_end
+                    )
+
+        for i in range(n):
+            full_distances[i][i] = 0.0
+            full_durations[i][i] = 0.0
 
         return MatrixResponse(
             distances_km=full_distances,

@@ -1,18 +1,12 @@
-from datetime import time
-from typing import Optional
 
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
-from route_engine.domain.models import (
-    Delivery,
-    Depot,
-    Location,
+from route_engine.route_engine.domain.models import (
     Problem,
     Route,
     Solution,
     SolveStatus,
     Stop,
-    Vehicle,
     haversine_distance,
     minutes_to_time,
     time_to_minutes,

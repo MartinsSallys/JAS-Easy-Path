@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +19,7 @@ router = APIRouter(prefix="/veiculos", tags=["Veículos"])
 @router.post("", response_model=VeiculoResponse, status_code=status.HTTP_201_CREATED)
 async def create_veiculo(
     veiculo: VeiculoCreate,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> VeiculoResponse:
     db_veiculo = Veiculo(**veiculo.model_dump())
     session.add(db_veiculo)
@@ -28,9 +30,9 @@ async def create_veiculo(
 
 @router.get("", response_model=list[VeiculoResponse])
 async def list_veiculos(
-    ativo: bool | None = Query(None),
-    tipo: VeiculoTipo | None = Query(None),
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ativo: Annotated[bool | None, Query()] = None,
+    tipo: Annotated[VeiculoTipo | None, Query()] = None,
 ) -> list[VeiculoResponse]:
     stmt = select(Veiculo)
     if ativo is not None:
@@ -45,7 +47,7 @@ async def list_veiculos(
 @router.get("/{veiculo_id}", response_model=VeiculoResponse)
 async def get_veiculo(
     veiculo_id: int,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> VeiculoResponse:
     veiculo = await session.get(Veiculo, veiculo_id)
     if not veiculo:
@@ -57,7 +59,7 @@ async def get_veiculo(
 async def update_veiculo(
     veiculo_id: int,
     veiculo_update: VeiculoUpdate,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> VeiculoResponse:
     veiculo = await session.get(Veiculo, veiculo_id)
     if not veiculo:
@@ -75,7 +77,7 @@ async def update_veiculo(
 @router.delete("/{veiculo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_veiculo(
     veiculo_id: int,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     veiculo = await session.get(Veiculo, veiculo_id)
     if not veiculo:

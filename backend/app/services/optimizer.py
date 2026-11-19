@@ -83,9 +83,8 @@ class RouteEngineAdapter:
     def _to_engine_problem(self, request: OptimizationRequest) -> Problem:
         work_start = time(8, 0)
         work_end = time(18, 0)
-        if request.options:
+        if request.options and request.options.time_limit_seconds:
             pass
-
         return Problem(
             depot=self._to_engine_depot(request.depot),
             vehicles=tuple(self._to_engine_vehicle(v) for v in request.vehicles),
@@ -105,7 +104,7 @@ class RouteEngineAdapter:
             sequence=stop.sequence,
             arrival_time=stop.arrival_time.isoformat() if stop.arrival_time else None,
             departure_time=stop.departure_time.isoformat() if stop.departure_time else None,
-            load_after=max(0, stop.load_after),
+            load_after=stop.load_after,
         )
 
     def _from_engine_route(
@@ -161,16 +160,14 @@ class RouteEngineAdapter:
         return self._from_engine_solution(solution, request)
 
 
-_optimizer: "RouteEngineAdapter | None" = None
+_optimizer_holder: dict = {"instance": None}
 
 
 def get_optimizer() -> RouteEngineAdapter:
-    global _optimizer
-    if _optimizer is None:
-        _optimizer = RouteEngineAdapter()
-    return _optimizer
+    if _optimizer_holder["instance"] is None:
+        _optimizer_holder["instance"] = RouteEngineAdapter()
+    return _optimizer_holder["instance"]
 
 
 def reset_optimizer() -> None:
-    global _optimizer
-    _optimizer = None
+    _optimizer_holder["instance"] = None

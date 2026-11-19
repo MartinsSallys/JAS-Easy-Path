@@ -1,18 +1,12 @@
-from datetime import time
-from typing import Optional
 
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from route_engine.domain.models import (
-    Delivery,
-    Depot,
-    Location,
     Problem,
     Route,
     Solution,
     SolveStatus,
     Stop,
-    Vehicle,
     haversine_distance,
     minutes_to_time,
     time_to_minutes,
@@ -49,13 +43,13 @@ class RouteEngine:
                         all_locations[j].latitude, all_locations[j].longitude
                     )
                     distance_matrix[i][j] = int(dist_m)
-                    duration_matrix[i][j] = int(dist_m / 8.33)
+                    duration_matrix[i][j] = max(1, int(dist_m / 500))  # ~30 km/h = 500 m/min
 
         demands = [0] + [d.demand for d in problem.deliveries]
         vehicle_capacities = [v.capacity for v in problem.vehicles]
         service_times = [0] + [d.service_time_min for d in problem.deliveries]
 
-        time_windows = [(0, 24 * 60)]
+        time_windows = []
         for d in problem.deliveries:
             if d.time_window_start and d.time_window_end:
                 start = time_to_minutes(d.time_window_start)
@@ -105,21 +99,34 @@ class RouteEngine:
         )
         time_dim = routing.GetDimensionOrDie("Time")
 
+        work_start_min = time_to_minutes(problem.work_start)
+        work_end_min = time_to_minutes(problem.work_end)
+        if work_end_min <= work_start_min:
+            work_end_min += 24 * 60
+
+        time_dim.CumulVar(manager.NodeToIndex(0)).SetRange(work_start_min, work_end_min)
+
         for i, (start, end) in enumerate(time_windows):
-            index = manager.NodeToIndex(i)
-            time_dim.CumulVar(index).SetRange(start, end)
+            index = manager.NodeToIndex(i + 1)
+            service_time = service_times[i + 1]
+            latest_arrival = end - service_time
+            latest_arrival = max(latest_arrival, start)
+            time_dim.CumulVar(index).SetRange(start, latest_arrival)
+
+            delivery = problem.deliveries[i]
+            if delivery.time_window_start and delivery.time_window_end:
+                arrival_var = time_dim.CumulVar(index)
+                departure_var = arrival_var + service_time
+                end_min = time_to_minutes(delivery.time_window_end)
+                if end_min <= time_to_minutes(delivery.time_window_start):
+                    end_min += 24 * 60
+                routing.solver().Add(departure_var <= end_min)
 
         for v in range(len(problem.vehicles)):
             start_idx = routing.Start(v)
             end_idx = routing.End(v)
-            time_dim.CumulVar(start_idx).SetRange(
-                time_to_minutes(problem.work_start),
-                time_to_minutes(problem.work_end)
-            )
-            time_dim.CumulVar(end_idx).SetRange(
-                time_to_minutes(problem.work_start),
-                time_to_minutes(problem.work_end)
-            )
+            time_dim.CumulVar(start_idx).SetRange(work_start_min, work_end_min)
+            time_dim.CumulVar(end_idx).SetRange(work_start_min, work_end_min)
 
         for i in range(1, n):
             routing.AddDisjunction([manager.NodeToIndex(i)], 100000)
@@ -153,8 +160,10 @@ class RouteEngine:
             while not routing.IsEnd(index):
                 node = manager.IndexToNode(index)
                 time_var = time_dim.CumulVar(index)
-                arrival = minutes_to_time(solution.Value(time_var))
-                departure = minutes_to_time(solution.Value(time_var) + service_times[node])
+                arrival_min = solution.Value(time_var)
+                arrival = minutes_to_time(arrival_min)
+                departure_min = arrival_min + service_times[node]
+                departure = minutes_to_time(departure_min)
 
                 if node == 0:
                     route_stops.append(Stop(
@@ -190,7 +199,8 @@ class RouteEngine:
 
             node = manager.IndexToNode(index)
             time_var = time_dim.CumulVar(index)
-            arrival = minutes_to_time(solution.Value(time_var))
+            arrival_min = solution.Value(time_var)
+            arrival = minutes_to_time(arrival_min)
             route_stops.append(Stop(
                 delivery_id=None,
                 location=problem.depot.location,
@@ -204,14 +214,15 @@ class RouteEngine:
             if len(route_stops) > 2:
                 total_drive_time = 0
                 for i in range(len(route_stops) - 1):
-                    from_node = route_stops[i].sequence if not route_stops[i].is_depot or i == 0 else 0
-                    to_node = route_stops[i + 1].sequence if not route_stops[i + 1].is_depot else 0
-                    if i < len(route_stops) - 1:
-                        from_idx = manager.NodeToIndex(from_node) if from_node < n else 0
-                        to_idx = manager.NodeToIndex(to_node) if to_node < n else 0
-                        from_n = manager.IndexToNode(from_idx)
-                        to_n = manager.IndexToNode(to_idx)
-                        total_drive_time += duration_matrix[from_n][to_n]
+                    from_stop = route_stops[i]
+                    to_stop = route_stops[i + 1]
+                    from_node_idx = 0 if from_stop.is_depot else (
+                        [d.id for d in problem.deliveries].index(from_stop.delivery_id) + 1
+                    )
+                    to_node_idx = 0 if to_stop.is_depot else (
+                        [d.id for d in problem.deliveries].index(to_stop.delivery_id) + 1
+                    )
+                    total_drive_time += duration_matrix[from_node_idx][to_node_idx]
 
                 total_service_time = sum(
                     d.service_time_min
@@ -222,7 +233,7 @@ class RouteEngine:
                     vehicle_id=problem.vehicles[v_idx].id,
                     stops=route_stops,
                     total_distance_m=route_distance,
-                    total_duration_min=(total_drive_time + total_service_time),
+                    total_duration_min=total_drive_time + total_service_time,
                     total_load=route_load,
                 ))
 

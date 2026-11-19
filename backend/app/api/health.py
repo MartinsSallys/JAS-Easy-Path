@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +17,7 @@ async def health_check() -> HealthResponse:
 
 @router.get("/health/ready")
 async def readiness_check(
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
     try:
         await session.execute(text("SELECT 1"))

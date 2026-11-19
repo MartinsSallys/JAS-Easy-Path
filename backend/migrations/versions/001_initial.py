@@ -27,12 +27,15 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id')
     )
 
+    veiculo_tipo_enum = sa.Enum(
+        'MOTO', 'CARRO', 'CAMINHAO', 'VAN', name='veiculotipo'
+    )
     op.create_table(
         'veiculos',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('placa', sa.String(length=10), nullable=False),
         sa.Column('capacidade', sa.Integer(), nullable=False),
-        sa.Column('tipo', sa.Enum('MOTO', 'CARRO', 'CAMINHAO', 'VAN', name='veiculotipo'), nullable=False, server_default='CAMINHAO'),
+        sa.Column('tipo', veiculo_tipo_enum, nullable=False, server_default='CAMINHAO'),
         sa.Column('ativo', sa.Boolean(), nullable=False, server_default='true'),
         sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
         sa.PrimaryKeyConstraint('id'),
@@ -40,6 +43,10 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_veiculos_placa'), 'veiculos', ['placa'], unique=True)
 
+    entrega_status_enum = sa.Enum(
+        'PENDENTE', 'ATRIBUIDA', 'EM_ROTA', 'ENTREGUE', 'FALHA', 'CANCELADA',
+        name='entregastatus'
+    )
     op.create_table(
         'entregas',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -50,7 +57,7 @@ def upgrade() -> None:
         sa.Column('demanda', sa.Integer(), nullable=False, server_default='1'),
         sa.Column('janela_inicio', sa.Time(), nullable=True),
         sa.Column('janela_fim', sa.Time(), nullable=True),
-        sa.Column('status', sa.Enum('PENDENTE', 'ATRIBUIDA', 'EM_ROTA', 'ENTREGUE', 'FALHA', 'CANCELADA', name='entregastatus'), nullable=False, server_default='PENDENTE'),
+        sa.Column('status', entrega_status_enum, nullable=False, server_default='PENDENTE'),
         sa.Column('observacoes', sa.Text(), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
@@ -63,6 +70,10 @@ def upgrade() -> None:
     op.create_index(op.f('ix_entregas_status'), 'entregas', ['status'])
     op.create_index(op.f('ix_entregas_rota_id'), 'entregas', ['rota_id'])
 
+    rota_status_enum = sa.Enum(
+        'RASCUNHO', 'OTIMIZADA', 'EM_ANDAMENTO', 'CONCLUIDA', 'CANCELADA',
+        name='rotastatus'
+    )
     op.create_table(
         'rotas',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -70,7 +81,7 @@ def upgrade() -> None:
         sa.Column('data', sa.Date(), nullable=False),
         sa.Column('deposito_id', sa.Integer(), nullable=False),
         sa.Column('veiculo_id', sa.Integer(), nullable=True),
-        sa.Column('status', sa.Enum('RASCUNHO', 'OTIMIZADA', 'EM_ANDAMENTO', 'CONCLUIDA', 'CANCELADA', name='rotastatus'), nullable=False, server_default='RASCUNHO'),
+        sa.Column('status', rota_status_enum, nullable=False, server_default='RASCUNHO'),
         sa.Column('distancia_total_km', sa.Float(), nullable=True),
         sa.Column('tempo_total_min', sa.Integer(), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
@@ -83,6 +94,10 @@ def upgrade() -> None:
     op.create_index(op.f('ix_rotas_data'), 'rotas', ['data'])
     op.create_index(op.f('ix_rotas_status'), 'rotas', ['status'])
 
+    parada_status_enum = sa.Enum(
+        'PENDENTE', 'EM_ANDAMENTO', 'CONCLUIDA', 'FALHA', 'PULADA',
+        name='paradastatus'
+    )
     op.create_table(
         'paradas',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -96,7 +111,7 @@ def upgrade() -> None:
         sa.Column('demanda', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('janela_inicio', sa.Time(), nullable=True),
         sa.Column('janela_fim', sa.Time(), nullable=True),
-        sa.Column('status', sa.Enum('PENDENTE', 'EM_ANDAMENTO', 'CONCLUIDA', 'FALHA', 'PULADA', name='paradastatus'), nullable=False, server_default='PENDENTE'),
+        sa.Column('status', parada_status_enum, nullable=False, server_default='PENDENTE'),
         sa.Column('tempo_servico_min', sa.Integer(), nullable=False, server_default='8'),
         sa.Column('chegada_prevista', sa.Time(), nullable=True),
         sa.Column('saida_prevista', sa.Time(), nullable=True),

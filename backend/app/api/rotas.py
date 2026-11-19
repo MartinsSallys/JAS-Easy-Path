@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -29,7 +30,7 @@ router = APIRouter(prefix="/rotas", tags=["Rotas"])
 @router.post("", response_model=RotaResponse, status_code=status.HTTP_201_CREATED)
 async def create_rota(
     rota: RotaCreate,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> RotaResponse:
     deposito = await session.get(Deposito, rota.deposito_id)
     if not deposito:
@@ -71,10 +72,10 @@ async def create_rota(
 
 @router.get("", response_model=list[RotaResponse])
 async def list_rotas(
-    data: str | None = Query(None),
-    status: RotaStatus | None = Query(None),
-    veiculo_id: int | None = Query(None),
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
+    data: Annotated[str | None, Query()] = None,
+    status: Annotated[RotaStatus | None, Query()] = None,
+    veiculo_id: Annotated[int | None, Query()] = None,
 ) -> list[RotaResponse]:
     stmt = select(Rota).order_by(Rota.data.desc(), Rota.created_at.desc())
     if data:
@@ -90,7 +91,7 @@ async def list_rotas(
 @router.get("/{rota_id}", response_model=RotaWithParadasResponse)
 async def get_rota(
     rota_id: int,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> RotaWithParadasResponse:
     stmt = (
         select(Rota)
@@ -108,7 +109,7 @@ async def get_rota(
 async def update_rota(
     rota_id: int,
     rota_update: RotaUpdate,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> RotaResponse:
     rota = await session.get(Rota, rota_id)
     if not rota:
@@ -127,7 +128,7 @@ async def update_rota(
 async def otimizar_rota(
     rota_id: int,
     optimize_req: RotaOptimizeRequest,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> RotaWithParadasResponse:
     stmt = (
         select(Rota)
@@ -248,7 +249,7 @@ async def otimizar_rota(
 @router.delete("/{rota_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_rota(
     rota_id: int,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     rota = await session.get(Rota, rota_id)
     if not rota:
@@ -269,7 +270,7 @@ async def delete_rota(
 @router.get("/{rota_id}/mapa")
 async def get_rota_mapa(
     rota_id: int,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
     stmt = (
         select(Rota)

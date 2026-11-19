@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +13,7 @@ router = APIRouter(prefix="/matrix", tags=["Matriz de Distância/Tempo"])
 @router.post("/calculate", response_model=MatrixResponse)
 async def calculate_matrix(
     request: MatrixRequest,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> MatrixResponse:
     try:
         locations = [

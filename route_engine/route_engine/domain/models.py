@@ -1,6 +1,5 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import time
-from typing import Optional
 from enum import Enum
 
 

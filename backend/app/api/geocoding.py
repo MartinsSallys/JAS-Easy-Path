@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +18,7 @@ router = APIRouter(prefix="/geocoding", tags=["Geocodificação"])
 @router.post("/forward", response_model=GeocodeResponse)
 async def forward_geocode(
     request: GeocodeRequest,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> GeocodeResponse:
     try:
         return await geocoder.geocode(request.endereco, request.country_code or "br")
@@ -29,7 +31,7 @@ async def forward_geocode(
 @router.post("/reverse", response_model=GeocodeResponse)
 async def reverse_geocode(
     request: ReverseGeocodeRequest,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> GeocodeResponse:
     try:
         result = await geocoder.reverse_geocode(request.latitude, request.longitude)
@@ -43,7 +45,7 @@ async def reverse_geocode(
 @router.post("/batch", response_model=list[GeocodeResponse])
 async def batch_geocode(
     request: GeocodeBatchRequest,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[GeocodeResponse]:
     try:
         return await geocoder.batch_geocode(request.enderecos, "br")

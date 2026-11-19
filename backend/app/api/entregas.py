@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +20,7 @@ router = APIRouter(prefix="/entregas", tags=["Entregas"])
 @router.post("", response_model=EntregaResponse, status_code=status.HTTP_201_CREATED)
 async def create_entrega(
     entrega: EntregaCreate,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EntregaResponse:
     db_entrega = Entrega(**entrega.model_dump())
     session.add(db_entrega)
@@ -30,7 +32,7 @@ async def create_entrega(
 @router.post("/batch", response_model=list[EntregaResponse], status_code=status.HTTP_201_CREATED)
 async def create_entregas_batch(
     batch: EntregaBatchCreate,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[EntregaResponse]:
     db_entregas = [Entrega(**e.model_dump()) for e in batch.entregas]
     session.add_all(db_entregas)
@@ -42,11 +44,11 @@ async def create_entregas_batch(
 
 @router.get("", response_model=list[EntregaResponse])
 async def list_entregas(
-    status: EntregaStatus | None = Query(None),
-    rota_id: int | None = Query(None),
-    limit: int = Query(100, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
+    status: Annotated[EntregaStatus | None, Query()] = None,
+    rota_id: Annotated[int | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[EntregaResponse]:
     stmt = select(Entrega).order_by(Entrega.created_at.desc())
     if status is not None:
@@ -61,7 +63,7 @@ async def list_entregas(
 @router.get("/{entrega_id}", response_model=EntregaResponse)
 async def get_entrega(
     entrega_id: int,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EntregaResponse:
     entrega = await session.get(Entrega, entrega_id)
     if not entrega:
@@ -73,7 +75,7 @@ async def get_entrega(
 async def update_entrega(
     entrega_id: int,
     entrega_update: EntregaUpdate,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EntregaResponse:
     entrega = await session.get(Entrega, entrega_id)
     if not entrega:
@@ -91,7 +93,7 @@ async def update_entrega(
 @router.delete("/{entrega_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_entrega(
     entrega_id: int,
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     entrega = await session.get(Entrega, entrega_id)
     if not entrega:

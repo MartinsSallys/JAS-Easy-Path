@@ -1,25 +1,31 @@
-from route_engine.domain.models import (
-    Depot,
+from .route_engine import (
     Delivery,
+    Depot,
     Location,
     Problem,
     Route,
+    RouteEngine,
     Solution,
     SolveStatus,
     Stop,
     Vehicle,
+    haversine_distance,
+    minutes_to_time,
+    time_to_minutes,
 )
-from route_engine.optimizer.ortools_solver import RouteEngine
 
 __all__ = [
-    "Depot",
     "Delivery",
+    "Depot",
     "Location",
     "Problem",
     "Route",
+    "RouteEngine",
     "Solution",
     "SolveStatus",
     "Stop",
     "Vehicle",
-    "RouteEngine",
+    "haversine_distance",
+    "minutes_to_time",
+    "time_to_minutes",
 ]
