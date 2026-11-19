@@ -13,6 +13,7 @@ from route_engine.services.validator import ValidationError, validate_problem
 def build_problem(vehicle_capacities: list[int], demands: list[int]) -> Problem:
     return validate_problem(
         {
+            "operating_hours": {"start": "08:00", "end": "18:00"},
             "depot": {
                 "id": 0,
                 "location": {"latitude": 0, "longitude": 0},

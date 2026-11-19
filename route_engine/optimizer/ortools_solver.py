@@ -80,6 +80,8 @@ def solve_routes(
 ) -> SolveResult:
     """Solve the CVRP for a validated Problem and a separate distance matrix.
 
+    This distance-and-capacity model does not enforce operating hours,
+    delivery windows, service duration, waiting, or return deadlines.
     Uses matrix positions ``[depot, *problem.deliveries]`` and returns routes
     with application IDs only as labels. A positive integer time limit is
     configurable; the default is one second.

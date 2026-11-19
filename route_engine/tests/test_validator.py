@@ -2,12 +2,20 @@ import math
 
 import pytest
 
-from route_engine.domain.models import Delivery, Depot, Location, Problem, Vehicle
+from route_engine.domain.models import (
+    Delivery,
+    Depot,
+    Location,
+    Problem,
+    TimeWindow,
+    Vehicle,
+)
 from route_engine.services.validator import ValidationError, validate_problem
 
 
 def valid_input() -> dict:
     return {
+        "operating_hours": {"start": "08:00", "end": "18:00"},
         "depot": {
             "id": 0,
             "location": {
@@ -69,8 +77,10 @@ def test_validate_problem_builds_typed_domain_objects() -> None:
                 longitude=-41.780,
                 address="Rua das Flores, 120, Parnaíba - PI",
             ),
+            time_window=TimeWindow(start_minute=480, end_minute=1080),
         ),
     )
+    assert problem.operating_hours == TimeWindow(start_minute=480, end_minute=1080)
     assert problem.total_demand == 4
     assert problem.total_capacity == 25
 
@@ -397,3 +407,226 @@ def test_accepts_total_demand_equal_to_total_capacity() -> None:
 
     assert problem.total_demand == 25
     assert problem.total_capacity == 25
+
+
+def test_rejects_legacy_payload_without_operating_hours() -> None:
+    raw = valid_input()
+    raw.pop("operating_hours")
+
+    assert_invalid(raw, "operating_hours")
+
+
+@pytest.mark.parametrize(
+    ("operating_hours", "expected_field"),
+    [
+        (None, "operating_hours"),
+        ({}, "operating_hours.start"),
+        ({"start": "08:00"}, "operating_hours.end"),
+        ({"end": "18:00"}, "operating_hours.start"),
+        ({"start": None, "end": "18:00"}, "operating_hours.start"),
+        ({"start": "08:00", "end": None}, "operating_hours.end"),
+    ],
+)
+def test_rejects_missing_null_or_partial_operating_hours(
+    operating_hours: object,
+    expected_field: str,
+) -> None:
+    raw = valid_input()
+    raw["operating_hours"] = operating_hours
+
+    assert_invalid(raw, expected_field)
+
+
+@pytest.mark.parametrize(
+    ("boundary", "value"),
+    [
+        ("start", 8),
+        ("start", True),
+        ("start", "8:00"),
+        ("start", "08:0"),
+        ("start", "25:00"),
+        ("start", "12:60"),
+        ("start", "24:00"),
+        ("end", "24:01"),
+        ("end", "18:60"),
+    ],
+)
+def test_rejects_invalid_operating_hour_values(
+    boundary: str,
+    value: object,
+) -> None:
+    raw = valid_input()
+    raw["operating_hours"][boundary] = value
+
+    assert_invalid(raw, f"operating_hours.{boundary}")
+
+
+@pytest.mark.parametrize("operating_hours", [[], "08:00-18:00", 1])
+def test_rejects_non_object_operating_hours(operating_hours: object) -> None:
+    raw = valid_input()
+    raw["operating_hours"] = operating_hours
+
+    assert_invalid(raw, "operating_hours")
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [("08:00", "08:00"), ("18:00", "08:00"), ("22:00", "02:00")],
+)
+def test_rejects_invalid_operating_hour_intervals(start: str, end: str) -> None:
+    raw = valid_input()
+    raw["operating_hours"] = {"start": start, "end": end}
+
+    assert_invalid(raw, "operating_hours")
+
+
+@pytest.mark.parametrize(
+    ("time_window", "expected_field"),
+    [
+        ({}, "deliveries.time_window.start"),
+        ({"start": "09:00"}, "deliveries.time_window.end"),
+        ({"end": "12:00"}, "deliveries.time_window.start"),
+        ({"start": None, "end": "12:00"}, "deliveries.time_window.start"),
+        ({"start": "09:00", "end": None}, "deliveries.time_window.end"),
+    ],
+)
+def test_rejects_partial_delivery_windows(
+    time_window: object,
+    expected_field: str,
+) -> None:
+    raw = valid_input()
+    raw["deliveries"][0]["time_window"] = time_window
+
+    assert_invalid(raw, expected_field)
+
+
+@pytest.mark.parametrize("time_window", [[], "09:00-12:00", 9])
+def test_rejects_non_object_delivery_windows(time_window: object) -> None:
+    raw = valid_input()
+    raw["deliveries"][0]["time_window"] = time_window
+
+    assert_invalid(raw, "deliveries.time_window")
+
+
+@pytest.mark.parametrize(
+    ("boundary", "value"),
+    [
+        ("start", 9),
+        ("start", "9:00"),
+        ("start", "24:00"),
+        ("end", "25:00"),
+        ("end", "24:01"),
+    ],
+)
+def test_rejects_invalid_delivery_window_values(boundary: str, value: object) -> None:
+    raw = valid_input()
+    raw["deliveries"][0]["time_window"] = {
+        "start": "09:00",
+        "end": "12:00",
+    }
+    raw["deliveries"][0]["time_window"][boundary] = value
+
+    assert_invalid(raw, f"deliveries.time_window.{boundary}")
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [("09:00", "09:00"), ("12:00", "09:00"), ("22:00", "02:00")],
+)
+def test_rejects_invalid_delivery_window_intervals(start: str, end: str) -> None:
+    raw = valid_input()
+    raw["deliveries"][0]["time_window"] = {"start": start, "end": end}
+
+    assert_invalid(raw, "deliveries.time_window")
+
+
+@pytest.mark.parametrize("window_value", ["missing", None])
+def test_delivery_without_window_inherits_operating_hours(window_value: object) -> None:
+    raw = valid_input()
+    if window_value is None:
+        raw["deliveries"][0]["time_window"] = None
+
+    problem = validate_problem(raw)
+
+    assert problem.deliveries[0].time_window == TimeWindow(480, 1080)
+
+
+@pytest.mark.parametrize(
+    ("operating_hours", "requested_window", "expected_window"),
+    [
+        (("08:00", "18:00"), ("09:00", "12:00"), (540, 720)),
+        (("08:00", "18:00"), ("06:00", "20:00"), (480, 1080)),
+        (("08:00", "18:00"), ("06:00", "09:00"), (480, 540)),
+        (("08:00", "18:00"), ("17:00", "20:00"), (1020, 1080)),
+    ],
+)
+def test_stores_delivery_window_intersection(
+    operating_hours: tuple[str, str],
+    requested_window: tuple[str, str],
+    expected_window: tuple[int, int],
+) -> None:
+    raw = valid_input()
+    raw["operating_hours"] = {
+        "start": operating_hours[0],
+        "end": operating_hours[1],
+    }
+    raw["deliveries"][0]["time_window"] = {
+        "start": requested_window[0],
+        "end": requested_window[1],
+    }
+
+    problem = validate_problem(raw)
+
+    assert problem.deliveries[0].time_window == TimeWindow(*expected_window)
+
+
+def test_rejects_delivery_window_without_intersection() -> None:
+    raw = valid_input()
+    raw["deliveries"][0]["time_window"] = {
+        "start": "06:00",
+        "end": "07:00",
+    }
+
+    assert_invalid(raw, "deliveries.time_window")
+
+
+@pytest.mark.parametrize(
+    ("start", "expected_minutes"),
+    [("17:52", 8), ("17:53", 7)],
+)
+def test_validates_minimum_effective_delivery_window(
+    start: str,
+    expected_minutes: int,
+) -> None:
+    raw = valid_input()
+    raw["deliveries"][0]["time_window"] = {
+        "start": start,
+        "end": "18:00",
+    }
+
+    if expected_minutes == 8:
+        problem = validate_problem(raw)
+        assert problem.deliveries[0].time_window == TimeWindow(1072, 1080)
+    else:
+        assert_invalid(raw, "deliveries.time_window")
+
+
+def test_accepts_24_00_as_end_and_converts_it_to_1440() -> None:
+    raw = valid_input()
+    raw["operating_hours"] = {"start": "23:50", "end": "24:00"}
+    raw["deliveries"][0]["time_window"] = {
+        "start": "23:52",
+        "end": "24:00",
+    }
+
+    problem = validate_problem(raw)
+
+    assert problem.operating_hours == TimeWindow(1430, 1440)
+    assert problem.deliveries[0].time_window == TimeWindow(1432, 1440)
+
+
+def test_inherited_operating_hours_must_fit_service_duration() -> None:
+    raw = valid_input()
+    raw["operating_hours"] = {"start": "08:00", "end": "08:07"}
+
+    assert_invalid(raw, "deliveries.time_window")

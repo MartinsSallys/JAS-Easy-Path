@@ -1,4 +1,11 @@
-from route_engine.domain.models import Delivery, Depot, Location, Problem, Vehicle
+from route_engine.domain.models import (
+    Delivery,
+    Depot,
+    Location,
+    Problem,
+    TimeWindow,
+    Vehicle,
+)
 
 
 def make_problem(
@@ -7,12 +14,23 @@ def make_problem(
     deliveries: tuple[Delivery, ...] = (),
 ) -> Problem:
     depot = Depot(id=0, location=Location(latitude=0, longitude=0))
-    return Problem(depot=depot, vehicles=vehicles, deliveries=deliveries)
+    operating_hours = TimeWindow(start_minute=480, end_minute=1080)
+    return Problem(
+        depot=depot,
+        vehicles=vehicles,
+        deliveries=deliveries,
+        operating_hours=operating_hours,
+    )
 
 
 def make_delivery(delivery_id: int, demand: int) -> Delivery:
     location = Location(latitude=0, longitude=0)
-    return Delivery(id=delivery_id, demand=demand, location=location)
+    return Delivery(
+        id=delivery_id,
+        demand=demand,
+        location=location,
+        time_window=TimeWindow(start_minute=480, end_minute=1080),
+    )
 
 
 def test_total_demand_sums_all_delivery_demands() -> None:

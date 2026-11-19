@@ -1,4 +1,16 @@
-from route_engine.domain.models import Delivery, Depot, Location, Problem, Vehicle
+import re
+
+from route_engine.domain.constraints import DELIVERY_SERVICE_DURATION_MINUTES
+from route_engine.domain.models import (
+    Delivery,
+    Depot,
+    Location,
+    Problem,
+    TimeWindow,
+    Vehicle,
+)
+
+_TIME_PATTERN = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]\Z")
 
 
 class ValidationError(Exception):
@@ -17,6 +29,96 @@ def _is_number(value: object) -> bool:
 
 def _error(field: str, message: str) -> dict:
     return {"field": field, "message": message}
+
+
+def _parse_time(value: object, field: str, *, allow_24: bool = False) -> int:
+    if not isinstance(value, str):
+        raise ValidationError([_error(field, "Horário deve ser uma string HH:MM")])
+
+    if value == "24:00" and allow_24:
+        return 24 * 60
+
+    if not _TIME_PATTERN.fullmatch(value):
+        raise ValidationError(
+            [_error(field, "Horário deve ser válido e estar no formato HH:MM")]
+        )
+
+    hours, minutes = (int(part) for part in value.split(":"))
+    return hours * 60 + minutes
+
+
+def _validate_time_window(raw: object, field: str) -> TimeWindow:
+    if not isinstance(raw, dict):
+        raise ValidationError([_error(field, "Intervalo deve ser um dicionário")])
+
+    for boundary in ("start", "end"):
+        boundary_field = f"{field}.{boundary}"
+        if boundary not in raw or raw[boundary] is None:
+            raise ValidationError([_error(boundary_field, "Horário é obrigatório")])
+
+    start_minute = _parse_time(raw["start"], f"{field}.start")
+    end_minute = _parse_time(raw["end"], f"{field}.end", allow_24=True)
+    if start_minute >= end_minute:
+        raise ValidationError(
+            [
+                _error(
+                    field,
+                    "Início deve ser anterior ao fim no mesmo dia",
+                )
+            ]
+        )
+
+    return TimeWindow(start_minute=start_minute, end_minute=end_minute)
+
+
+def _delivery_time_window(
+    delivery_data: dict,
+    operating_hours: TimeWindow,
+) -> TimeWindow:
+    requested_data = delivery_data.get("time_window")
+    if requested_data is None:
+        effective_window = operating_hours
+    else:
+        requested_window = _validate_time_window(
+            requested_data,
+            "deliveries.time_window",
+        )
+        effective_start = max(
+            requested_window.start_minute,
+            operating_hours.start_minute,
+        )
+        effective_end = min(
+            requested_window.end_minute,
+            operating_hours.end_minute,
+        )
+        if effective_start >= effective_end:
+            raise ValidationError(
+                [
+                    _error(
+                        "deliveries.time_window",
+                        "Janela não se sobrepõe ao expediente",
+                    )
+                ]
+            )
+        effective_window = TimeWindow(
+            start_minute=effective_start,
+            end_minute=effective_end,
+        )
+
+    if (
+        effective_window.end_minute - effective_window.start_minute
+        < DELIVERY_SERVICE_DURATION_MINUTES
+    ):
+        raise ValidationError(
+            [
+                _error(
+                    "deliveries.time_window",
+                    "Janela efetiva deve permitir pelo menos 8 minutos de atendimento",
+                )
+            ]
+        )
+
+    return effective_window
 
 
 def _validate_id(value: object, field: str) -> int:
@@ -93,6 +195,10 @@ def validate_problem(raw: object) -> Problem:
     if not deliveries_data:
         raise ValidationError([_error("deliveries", "Nenhuma entrega informada")])
 
+    if raw.get("operating_hours") is None:
+        raise ValidationError([_error("operating_hours", "Expediente é obrigatório")])
+    operating_hours = _validate_time_window(raw["operating_hours"], "operating_hours")
+
     depot_id = _validate_id(depot_data.get("id"), "depot.id")
     depot = Depot(
         id=depot_id,
@@ -145,6 +251,7 @@ def validate_problem(raw: object) -> Problem:
                 location=_validate_location(
                     delivery_data.get("location"), "deliveries"
                 ),
+                time_window=_delivery_time_window(delivery_data, operating_hours),
             )
         )
 
@@ -152,6 +259,7 @@ def validate_problem(raw: object) -> Problem:
         depot=depot,
         vehicles=tuple(vehicles),
         deliveries=tuple(deliveries),
+        operating_hours=operating_hours,
     )
 
     if any(delivery.demand > problem.max_capacity for delivery in problem.deliveries):

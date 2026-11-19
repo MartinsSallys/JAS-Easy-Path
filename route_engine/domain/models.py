@@ -2,6 +2,12 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class TimeWindow:
+    start_minute: int
+    end_minute: int
+
+
+@dataclass(frozen=True)
 class Location:
     latitude: float
     longitude: float
@@ -25,6 +31,7 @@ class Delivery:
     id: int
     demand: int
     location: Location
+    time_window: TimeWindow
 
 
 @dataclass(frozen=True)
@@ -32,6 +39,7 @@ class Problem:
     depot: Depot
     vehicles: tuple[Vehicle, ...]
     deliveries: tuple[Delivery, ...]
+    operating_hours: TimeWindow
 
     @property
     def total_demand(self) -> int:

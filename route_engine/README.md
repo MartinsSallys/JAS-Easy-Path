@@ -45,7 +45,8 @@ O solver usa Google OR-Tools 9.15.6755, instalado como dependência de execuçã
 fixado em `poetry.lock`. Ele minimiza a distância total da matriz, atende todas as
 entregas exatamente uma vez e aplica a capacidade individual de cada veículo. Todos
 os veículos começam e terminam no depósito; um veículo sem entregas retorna ao mesmo
-depósito sem percorrer distância.
+depósito sem percorrer distância. **O solver ainda não aplica expediente ou janelas
+de entrega e não garante que as rotas calculadas sejam temporalmente viáveis.**
 
 A busca usa `PATH_CHEAPEST_ARC` para criar uma solução inicial e `GUIDED_LOCAL_SEARCH`
 para buscar melhorias, com limite padrão de 1 segundo (`time_limit_seconds` pode ser
@@ -55,8 +56,95 @@ sem solução: somente `ROUTING_INFEASIBLE` é tratado como inviabilidade compro
 `ROUTING_FAIL` e `ROUTING_FAIL_TIMEOUT` indicam busca encerrada sem solução. Sem uma
 atribuição, rotas e distância total vêm como `None`.
 
-Janelas de entrega, duração de atendimento e limites de jornada ficam para uma etapa
-posterior. O motor ainda não geocodifica endereços nem calcula distâncias rodoviárias.
+O solver não tem dimensão temporal nem matriz de tempos. Ele não considera duração de
+atendimento, espera por abertura de janela ou retorno ao depósito até o fim do
+expediente. A validação dos horários verifica apenas a coerência local do contrato;
+deslocamentos e a sequência das paradas ainda não são avaliados. O exemplo executável
+envia um aviso para `stderr` antes de imprimir o JSON do resultado em `stdout`.
+
+O motor ainda não geocodifica endereços nem calcula distâncias rodoviárias.
+
+## Contrato de expediente e janelas
+
+O payload exige `operating_hours` com `start` e `end`. Cada entrega pode informar
+`time_window`; se a chave for omitida ou tiver valor `null`, a entrega herda o
+expediente. Uma janela explícita deve conter os dois limites.
+
+```json
+{
+  "operating_hours": {"start": "08:00", "end": "18:00"},
+  "depot": {
+    "id": 0,
+    "location": {
+      "address": "Depósito, Parnaíba - PI",
+      "latitude": -2.905,
+      "longitude": -41.776
+    }
+  },
+  "vehicles": [
+    {"id": 152, "capacity": 10},
+    {"id": 153, "capacity": 15}
+  ],
+  "deliveries": [
+    {
+      "id": 101,
+      "demand": 4,
+      "location": {
+        "address": "Rua das Flores, Parnaíba - PI",
+        "latitude": -2.910,
+        "longitude": -41.780
+      },
+      "time_window": {"start": "09:00", "end": "12:00"}
+    },
+    {
+      "id": 102,
+      "demand": 3,
+      "location": {
+        "address": "Av. São Sebastião, Parnaíba - PI",
+        "latitude": -2.920,
+        "longitude": -41.790
+      }
+    }
+  ]
+}
+```
+
+Os horários usam `HH:MM`, com zero à esquerda e sem segundos. São convertidos em
+minutos desde o início do dia (`08:00` = 480). `24:00` é aceito somente como limite
+final e representa 1440 minutos; não pode ser início. Intervalos iguais, invertidos
+ou que atravessam a meia-noite são rejeitados.
+
+A janela efetiva é a interseção com o expediente. Por exemplo, expediente
+`08:00–18:00` e janela solicitada `17:00–20:00` resultam em `17:00–18:00`. Janelas
+sem interseção ou com menos de 8 minutos efetivos são rejeitadas; exatamente 8
+minutos é válido. Cada atendimento dura 8 minutos, valor interno e não configurável
+no payload. Produtos são considerados disponíveis e conferidos no início da
+operação. A validação não agenda o atendimento nem prova que uma rota consegue
+respeitar os horários.
+
+`Delivery.time_window` armazena somente a janela efetiva em minutos; a janela original
+solicitada não é preservada nesse modelo. Um futuro cadastro que precise exibir ou
+editar o valor original deverá armazená-lo separadamente.
+
+### Migração de payloads existentes
+
+Payloads sem expediente agora são rejeitados. Informe `operating_hours` em cada
+problema existente; não há expediente padrão. Janelas por entrega continuam
+opcionais, então omiti-las mantém o comportamento de herdar o expediente:
+
+```json
+{
+  "operating_hours": {"start": "08:00", "end": "18:00"}
+}
+```
+
+O contrato registra atendimento fixo e janelas, mas o solver ainda não aplica as
+restrições temporais. A próxima integração precisará modelar duração de viagem,
+atendimento de 8 minutos (sem atendimento no depósito), espera por abertura, início e
+término do atendimento dentro da janela, retorno de todos os veículos antes do
+fechamento e operação sem atravessar a meia-noite. Chegar antes da abertura permitirá
+espera; os produtos são considerados disponíveis e conferidos no início do dia. Essas
+regras aprovadas ainda não são verificadas pelas rotas atuais.
 
 Após alterar restrições de dependências no `pyproject.toml`, atualize o lock com
 `poetry lock` e revise as mudanças antes de instalá-las.

@@ -12,6 +12,7 @@ def build_manual_scenario() -> tuple[Problem, list[list[int]]]:
     """
     problem = validate_problem(
         {
+            "operating_hours": {"start": "08:00", "end": "18:00"},
             "depot": {
                 "id": 0,
                 "location": {"latitude": -2.9, "longitude": -41.7},
