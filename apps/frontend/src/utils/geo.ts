@@ -7,7 +7,7 @@ interface Point {
 
 const EARTH_RADIUS_KM = 6371;
 const AVERAGE_SPEED_KMH = 25; // DEMONSTRATIVA
-const MINUTES_PER_STOP = 4; // DEMONSTRATIVA
+const MINUTES_PER_STOP = 8; // DEMONSTRATIVA
 
 const toRad = (deg: number) => (deg * Math.PI) / 180;
 
