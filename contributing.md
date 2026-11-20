@@ -1,6 +1,6 @@
-# Contribuindo com o RotaCerta
+# Contribuindo com o JAS Easy Path
 
-Obrigado por querer contribuir com o RotaCerta. Este projeto ainda está em fase inicial, mas toda ajuda é bem-vinda: melhorias de ideia, correções, documentação, testes e sugestões de experiência.
+Obrigado por querer contribuir com o JAS Easy Path. Este projeto ainda está em fase inicial, mas toda ajuda é bem-vinda: melhorias de ideia, correções, documentação, testes e sugestões de experiência.
 
 ## Como contribuir
 
@@ -115,4 +115,4 @@ Contribuições devem ser respeitosas, construtivas e focadas no avanço do proj
 
 Se você quiser propor algo novo ou discutir uma ideia antes de implementar, abra uma issue ou entre em contato com a equipe responsável pelo repositório.
 
-Agradecemos seu interesse e sua contribuição para o RotaCerta.
+Agradecemos seu interesse e sua contribuição para o JAS Easy Path.

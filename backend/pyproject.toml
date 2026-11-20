@@ -1,0 +1,59 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "JAS Easy Path - Backend API"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+    "ortools>=9.10",
+    "tenacity>=8.3.0",
+    "greenlet>=3.0",
+    "route-engine @ file:///C:/Users/aland/hack-br-rota-certa/route_engine",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "httpx>=0.27.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+]
+
+[build-system]
+requires = ["setuptools>=70.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+exclude = ["migrations*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+lint.select = ["E", "F", "I", "UP", "B", "C4", "PTH", "SIM", "T20", "ANN", "ARG", "ERA", "PD", "PL", "TRY", "NPY", "RSE", "RET", "PERF", "LOG"]
+lint.ignore = ["ANN001", "ANN002", "ANN003", "ARG001", "ARG002", "TRY003"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+strict_optional = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
