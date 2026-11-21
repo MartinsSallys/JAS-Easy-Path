@@ -20,8 +20,8 @@ export interface Delivery {
   address: string;
   lat: number;
   lng: number;
-  windowStart: string; 
-  windowEnd: string; 
+  windowStart: string;
+  windowEnd: string;
   priority: Priority;
   status: DeliveryStatus;
   notes: string;
@@ -49,13 +49,26 @@ export interface Place {
   lng: number;
 }
 
-export interface RoutePlan {
-  id: string;
-  driverName: string;
-  origin: Place;
-  stopIds: string[]; // ids das entregas, NA ORDEM de visita
+/** Rota atribuída a um veículo específico dentro do plano do dia. */
+export interface VehicleRoute {
+  vehicleId: string;
+  vehicleName: string;
+  capacity: number; 
+  load: number; 
+  stopIds: string[];
   distanceKm: number;
   durationMin: number;
+  travelMin: number;
+  waitMin: number;
+  serviceMin: number;
+}
+
+export interface RoutePlan {
+  id: string;
+  origin: Place;
+  routes: VehicleRoute[];
+  totalDistanceKm: number;
+  totalDurationMin: number;
   status: "planned" | "running" | "finished";
   isSimulation: boolean;
 }
