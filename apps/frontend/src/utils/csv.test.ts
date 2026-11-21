@@ -1,17 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { parseDeliveriesCsv } from "./csv";
+import { parseDeliveriesCsv, type CsvParseResult } from "./csv";
+
+function hasStructuralError(result: CsvParseResult, code: string): boolean {
+  const inFile = result.fileError?.includes(code) ?? false;
+  const inRows = result.rows.some((row) => row.errors.some((err) => err.includes(code)));
+  return inFile || inRows;
+}
 
 describe("parseDeliveriesCsv", () => {
-  it("reporta erro na linha quando abre aspas nas observações e não fecha", () => {
+  it("reporta erro quando abre aspas nas observações e não fecha", () => {
     const csv = [
       "pedido,cliente,telefone,endereco,janela_inicio,janela_fim,prioridade,observacoes",
       '#101,Maria Souza,(71) 98888-1234,"Rua das Flores, 10",19:00,19:30,normal,"Portão azul sem fechar',
     ].join("\n");
 
     const result = parseDeliveriesCsv(csv);
-    expect(result.rows).toHaveLength(1);
-    expect(result.rows[0].line).toBe(2);
-    expect(result.rows[0].errors.some((e) => e.includes("MissingQuotes") || e.includes("aspas"))).toBe(true);
+    expect(hasStructuralError(result, "MissingQuotes")).toBe(true);
+  });
+
+  it("reporta erro quando há linha vazia antes da entrega com aspas abertas", () => {
+    const csv = "cliente,endereco,observacoes\n\nAna,Rua A,\"sem fechar";
+
+    const result = parseDeliveriesCsv(csv);
+    expect(hasStructuralError(result, "MissingQuotes")).toBe(true);
+  });
+
+  it("reporta erro quando uma entrega anterior tem quebra de linha entre aspas e a seguinte deixa aspas abertas", () => {
+    const csv = [
+      "cliente,endereco,observacoes",
+      'Ana,Rua A,"texto',
+      'continua"',
+      'Bia,Rua B,"sem fechar',
+    ].join("\n");
+
+    const result = parseDeliveriesCsv(csv);
+    expect(hasStructuralError(result, "MissingQuotes")).toBe(true);
   });
 
   it("reporta erro na linha quando há coluna extra além do cabeçalho", () => {

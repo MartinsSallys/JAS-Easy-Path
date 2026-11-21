@@ -27,9 +27,9 @@ Este documento especifica o contrato HTTP/JSON entre o front-end (`apps/frontend
 * **Janela opcional:** Ao cadastrar uma entrega (formulário ou CSV), `time_window` pode ser enviado como `null`. Nesse caso, a entrega herda automaticamente o expediente operacional do dia (ex.: `08:00` às `22:00` → `{ "start": 480, "end": 1320 }`) e retorna com `has_explicit_time_window: false`.
 * **Janela explícita:** Quando informada, `start` e `end` devem ser preenchidos em par, respeitando `0 <= start < end <= 1440` e comportando os 8 minutos mínimos de atendimento (`end - start >= 8`).
 
-### 2.2. Capacidade dos Veículos e Demanda (Limitação Conhecida do MVP)
-* **Unidade de medida no MVP:** Cada entrega possui `demand = 1` (**1 pedido = 1 unidade**) e o campo `capacity` do veículo representa o **número máximo de pedidos** que ele comporta na saída.
-* **Limitação explícita:** Nesta versão inicial, o sistema **não modela peso (kg) nem volume físico (m³)** dos itens. O campo `demand` já é trafegado como inteiro positivo no contrato para permitir evolução futura para peso ou cubagem sem quebra de compatibilidade da API.
+### 2.2. Capacidade dos Veículos e Demanda *(Pendência de alinhamento com o grupo)*
+* **Proposta em discussão para o MVP:** Cada entrega envia `demand = 1` (**1 pedido = 1 unidade**) e o campo `capacity` do veículo representa o **número máximo de pedidos** que ele comporta na saída.
+* **Ponto em aberto (issues #7 e #8):** O grupo ainda precisa confirmar se no MVP a capacidade será simplificada por contagem de pedidos (sem modelar peso em kg ou volume em m³) ou se será necessário informar peso/volume real por entrega e por veículo. O campo `demand` já existe como inteiro positivo no contrato para suportar ambas as abordagens sem quebrar a estrutura da API.
 
 ### 2.3. Múltiplos Veículos e Obrigatoriedade de Atendimento
 * **Frota com 1 ou mais veículos:** O plano retornado (`RoutePlanDTO`) contém uma lista `routes` (`VehicleRouteDTO[]`), permitindo que o front-end exiba um seletor para alternar entre os veículos ativos e visualizar a sequência de paradas de cada um.
