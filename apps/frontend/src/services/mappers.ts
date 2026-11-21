@@ -1,10 +1,11 @@
-import type { Delivery, NewDelivery, Place, RoutePlan } from "@/types/domain";
+import type { Delivery, NewDelivery, Place, RoutePlan, VehicleRoute } from "@/types/domain";
 import type {
   DeliveryDTO,
   NewDeliveryDTO,
   PlaceDTO,
   RoutePlanDTO,
   TimeWindowDTO,
+  VehicleRouteDTO,
 } from "@/types/dto";
 
 /**
@@ -12,7 +13,7 @@ import type {
  * TODA conversão de formato fica aqui: ids, horários, coordenadas, demanda, unidades, rotas.
  */
 
-/** Demanda enviada por entrega até o cadastro ter esse campo: cada pedido conta como 1. */
+/** Demanda enviada por entrega no MVP: cada pedido conta como 1 unidade de capacidade do veículo. */
 export const DEFAULT_DEMAND = 1;
 
 const MINUTES_PER_DAY = 1440;
@@ -77,12 +78,6 @@ function toPlace(dto: PlaceDTO): Place {
   };
 }
 
-/**
- * ATENÇÃO (solução provisória): o domínio ainda não tem "sem coordenadas".
- * Entrega sem localização vira lat/lng 0 e NUNCA pode estar em stop_ids (contrato).
- * Se a geocodificação falhou e a entrega ainda não saiu, ela aparece como Pendência
- * com o motivo "Endereço não localizado", e a mensagem do back entra nas observações.
- */
 export function toDelivery(dto: DeliveryDTO): Delivery {
   const unlocated = dto.location === null;
   const geocodingFailed = unlocated && dto.geocoding_status !== "pending";
@@ -128,32 +123,37 @@ export function toNewDeliveryDTO(input: NewDelivery): NewDeliveryDTO {
 }
 
 // ---------------------------------------------------------------------------
-// Rota
+// Rota (suporte a múltiplos veículos)
 // ---------------------------------------------------------------------------
 
+function toVehicleRoute(dto: VehicleRouteDTO): VehicleRoute {
+  return {
+    vehicleId: String(dto.vehicle.id),
+    vehicleName: dto.vehicle.name,
+    capacity: dto.vehicle.capacity,
+    load: dto.load,
+    stopIds: dto.stops.map((stop) => String(stop.delivery_id)),
+    distanceKm: Math.round(dto.distance_m / 100) / 10,
+    durationMin: dto.total_min,
+    travelMin: dto.travel_min,
+    waitMin: dto.wait_min,
+    serviceMin: dto.service_min,
+  };
+}
+
 export function toRoutePlan(dto: RoutePlanDTO): RoutePlan {
-  const base = {
+  const routes = dto.routes.map(toVehicleRoute);
+  const totalDistanceKm =
+    Math.round(routes.reduce((sum, route) => sum + route.distanceKm, 0) * 10) / 10;
+  const totalDurationMin = routes.reduce((sum, route) => sum + route.durationMin, 0);
+
+  return {
     id: String(dto.id),
     origin: toPlace(dto.origin),
+    routes,
+    totalDistanceKm,
+    totalDurationMin,
     status: dto.status,
     isSimulation: dto.matrix_source === "manual",
-  };
-
-  if (dto.routes.length === 0) {
-    return { ...base, driverName: "Sem veículo atribuído", stopIds: [], distanceKm: 0, durationMin: 0 };
-  }
-  if (dto.routes.length > 1) {
-    throw new Error(
-      `A API devolveu ${dto.routes.length} rotas. O front do MVP exibe uma rota (um veículo).`,
-    );
-  }
-
-  const route = dto.routes[0];
-  return {
-    ...base,
-    driverName: route.vehicle.name,
-    stopIds: route.stops.map((stop) => String(stop.delivery_id)),
-    distanceKm: Math.round(route.distance_m / 100) / 10,
-    durationMin: route.total_min,
   };
 }
