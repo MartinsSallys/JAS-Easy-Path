@@ -5,6 +5,11 @@ import pytest
 from app.schemas import MatrixResponse
 from app.services.matrix import MatrixService
 
+LOCATION_COUNT = 3
+EXPECTED_DISTANCE_KM = 5.2
+EXPECTED_DURATION_MIN = 8.0
+CHUNKED_LOCATION_COUNT = 51
+
 
 @pytest.fixture
 def matrix_service() -> MatrixService:
@@ -12,7 +17,7 @@ def matrix_service() -> MatrixService:
 
 
 @pytest.fixture
-def mock_ors_response():
+def mock_ors_response() -> dict:
     return {
         "distances": [
             [0, 5200, 8100],
@@ -47,11 +52,11 @@ async def test_get_matrix_success(matrix_service: MatrixService, mock_ors_respon
     assert isinstance(response, MatrixResponse)
     assert response.provider == "openrouteservice"
     assert response.cached is False
-    assert len(response.distances_km) == 3
-    assert len(response.distances_km[0]) == 3
+    assert len(response.distances_km) == LOCATION_COUNT
+    assert len(response.distances_km[0]) == LOCATION_COUNT
     # Check conversion from meters to km
-    assert response.distances_km[0][1] == 5.2  # 5200m = 5.2km
-    assert response.durations_min[0][1] == 8.0  # 480s = 8.0min
+    assert response.distances_km[0][1] == EXPECTED_DISTANCE_KM  # 5200m = 5.2km
+    assert response.durations_min[0][1] == EXPECTED_DURATION_MIN  # 480s = 8.0min
 
 
 @pytest.mark.asyncio
@@ -104,7 +109,7 @@ async def test_get_matrix_km_units(matrix_service: MatrixService) -> None:
 
         response = await matrix_service.get_matrix(locations)
 
-    assert response.distances_km[0][1] == 5.2  # Already in km
+    assert response.distances_km[0][1] == EXPECTED_DISTANCE_KM  # Already in km
 
 
 @pytest.mark.asyncio
@@ -182,7 +187,9 @@ async def test_get_matrix_unknown_units_raises(matrix_service: MatrixService) ->
 
 
 @pytest.mark.asyncio
-async def test_get_matrix_chunked_under_limit(matrix_service: MatrixService, mock_ors_response) -> None:
+async def test_get_matrix_chunked_under_limit(
+    matrix_service: MatrixService, mock_ors_response
+) -> None:
     """Test chunked falls back to get_matrix when under limit."""
     locations = [
         {"latitude": -23.5617, "longitude": -46.6560},
@@ -211,12 +218,7 @@ async def test_get_matrix_chunked_over_limit(matrix_service: MatrixService) -> N
         for i in range(51)
     ]
 
-    # Mock get_matrix to return a valid matrix for each chunk
-    chunk_size = 50
-    n = 51
-    (n + chunk_size - 1) // chunk_size  # 2 chunks
-
-    async def mock_get_matrix(locs, metrics, profile):
+    async def mock_get_matrix(locs, metrics, profile) -> MatrixResponse:  # noqa: ANN001
         size = len(locs)
         distances = [[float(abs(i - j) * 1000) for j in range(size)] for i in range(size)]
         durations = [[float(abs(i - j) * 60) for j in range(size)] for i in range(size)]
@@ -232,12 +234,12 @@ async def test_get_matrix_chunked_over_limit(matrix_service: MatrixService) -> N
 
         response = await matrix_service.get_matrix_chunked(locations)
 
-    assert len(response.distances_km) == 51
-    assert len(response.distances_km[0]) == 51
-    assert len(response.durations_min) == 51
-    assert len(response.durations_min[0]) == 51
+    assert len(response.distances_km) == CHUNKED_LOCATION_COUNT
+    assert len(response.distances_km[0]) == CHUNKED_LOCATION_COUNT
+    assert len(response.durations_min) == CHUNKED_LOCATION_COUNT
+    assert len(response.durations_min[0]) == CHUNKED_LOCATION_COUNT
     # Diagonal should be 0
-    for i in range(51):
+    for i in range(CHUNKED_LOCATION_COUNT):
         assert response.distances_km[i][i] == 0.0
         assert response.durations_min[i][i] == 0.0
     # Cross-chunk entries should be filled
@@ -253,7 +255,7 @@ async def test_get_matrix_chunked_symmetric(matrix_service: MatrixService) -> No
         for i in range(55)
     ]
 
-    async def mock_get_matrix(locs, metrics, profile):
+    async def mock_get_matrix(locs, metrics, profile) -> MatrixResponse:  # noqa: ANN001
         size = len(locs)
         distances = [[float(abs(i - j) * 1000) for j in range(size)] for i in range(size)]
         durations = [[float(abs(i - j) * 60) for j in range(size)] for i in range(size)]

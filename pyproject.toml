@@ -21,7 +21,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["route_engine/tests"]
 python_files = ["test_*.py"]
-pythonpath = ["."]
+pythonpath = ["route_engine"]
 
 [tool.taskipy.tasks]
 lint = "ruff check route_engine"

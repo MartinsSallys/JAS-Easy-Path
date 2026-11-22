@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,8 +7,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.session import get_session
-from app.models import Deposito, Entrega, Parada, Rota, Veiculo
+from app.models import (
+    Deposito,
+    Entrega,
+    EntregaStatus,
+    Parada,
+    ParadaStatus,
+    Rota,
+    Veiculo,
+)
 from app.schemas import (
+    OptimizationDelivery,
+    OptimizationLocation,
+    OptimizationRequest,
+    OptimizationVehicle,
     RotaCreate,
     RotaOptimizeRequest,
     RotaResponse,
@@ -17,12 +29,6 @@ from app.schemas import (
     RotaWithParadasResponse,
 )
 from app.services import get_optimizer
-from app.services.optimizer import (
-    OptimizationDelivery,
-    OptimizationLocation,
-    OptimizationRequest,
-    OptimizationVehicle,
-)
 
 router = APIRouter(prefix="/rotas", tags=["Rotas"])
 
@@ -63,7 +69,7 @@ async def create_rota(
     if rota.entrega_ids:
         for entrega in entregas_list:
             entrega.rota_id = db_rota.id
-            entrega.status = "atribuida"
+            entrega.status = EntregaStatus.ATRIBUIDA
 
     await session.commit()
     await session.refresh(db_rota)
@@ -190,7 +196,7 @@ async def otimizar_rota(
 
     opt_response = get_optimizer().solve(opt_request)
 
-    if opt_response.status == "infeasible":
+    if opt_response.status == "infeasible" or not opt_response.routes:
         raise HTTPException(
             status_code=422,
             detail="Não foi possível encontrar solução viável com as restrições atuais",
@@ -202,11 +208,9 @@ async def otimizar_rota(
 
     for route_result in opt_response.routes:
         for stop in route_result.stops:
-            if stop.delivery_id is None:
-                demanda_parada = 0
-            else:
+            entrega = None
+            if stop.delivery_id is not None:
                 entrega = await session.get(Entrega, stop.delivery_id)
-                demanda_parada = entrega.demanda if entrega else 0
 
             parada = Parada(
                 rota_id=rota.id,
@@ -216,23 +220,33 @@ async def otimizar_rota(
                 endereco=stop.location.address or "",
                 latitude=stop.location.latitude,
                 longitude=stop.location.longitude,
-                demanda=demanda_parada,
+                demanda=entrega.demanda if entrega else 0,
+                janela_inicio=entrega.janela_inicio if entrega else None,
+                janela_fim=entrega.janela_fim if entrega else None,
+                chegada_prevista=(
+                    time.fromisoformat(stop.arrival_time)
+                    if stop.arrival_time
+                    else None
+                ),
+                saida_prevista=(
+                    time.fromisoformat(stop.departure_time)
+                    if stop.departure_time
+                    else None
+                ),
                 tempo_servico_min=8,
-                status="pendente",
+                status=ParadaStatus.PENDENTE,
             )
             session.add(parada)
 
-            if stop.delivery_id:
-                entrega = await session.get(Entrega, stop.delivery_id)
-                if entrega:
-                    entrega.parada_ordem = stop.sequence
-                    entrega.status = "atribuida"
+            if entrega:
+                entrega.parada_ordem = stop.sequence
+                entrega.status = EntregaStatus.ATRIBUIDA
 
     rota.status = RotaStatus.OTIMIZADA
     rota.distancia_total_km = sum(r.total_distance_km for r in opt_response.routes)
     rota.tempo_total_min = sum(r.total_duration_min for r in opt_response.routes)
-    rota.otimizada_em = datetime.utcnow()
-    rota.veiculo_id = route_result.vehicle_id
+    rota.otimizada_em = datetime.now(UTC).replace(tzinfo=None)
+    rota.veiculo_id = opt_response.routes[0].vehicle_id
 
     await session.commit()
     await session.refresh(rota)
@@ -261,7 +275,7 @@ async def delete_rota(
     for entrega in entregas.scalars().all():
         entrega.rota_id = None
         entrega.parada_ordem = None
-        entrega.status = "pendente"
+        entrega.status = EntregaStatus.PENDENTE
 
     await session.delete(rota)
     await session.commit()

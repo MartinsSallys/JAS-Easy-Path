@@ -1,251 +1,301 @@
+"""Capacitated vehicle routing integration using Google OR-Tools."""
 
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
-from route_engine.domain.models import (
-    Problem,
-    Route,
-    Solution,
-    SolveStatus,
-    Stop,
-    haversine_distance,
-    minutes_to_time,
-    time_to_minutes,
+from route_engine.domain.constraints import DELIVERY_SERVICE_DURATION_MINUTES
+from route_engine.domain.models import Problem
+from route_engine.optimizer.results import (
+    RoutePoint,
+    SolveResult,
+    SolverStatus,
+    VehicleRoute,
 )
+from route_engine.services.distance_matrix import validate_distance_matrix
+from route_engine.services.duration_matrix import validate_duration_matrix
 
 
-class RouteEngine:
-    def __init__(
-        self,
-        time_limit_seconds: int = 30,
-        first_solution_strategy: str = "PATH_CHEAPEST_ARC",
-    ):
-        self.time_limit = time_limit_seconds
-        self.first_solution_strategy = getattr(
-            routing_enums_pb2.FirstSolutionStrategy,
-            first_solution_strategy,
-        )
+def _status_without_solution(status_code: int) -> SolverStatus:
+    statuses = routing_enums_pb2.RoutingSearchStatus
+    if status_code == statuses.ROUTING_INFEASIBLE:
+        return SolverStatus.INFEASIBLE
+    if status_code == statuses.ROUTING_INVALID:
+        return SolverStatus.INVALID_MODEL
+    return SolverStatus.NO_SOLUTION
 
-    def solve(self, problem: Problem) -> Solution:
-        import time as time_module
-        start_time = time_module.time()
 
-        all_locations = [problem.depot.location] + [d.location for d in problem.deliveries]
-        n = len(all_locations)
+def _point_for_index(
+    problem: Problem,
+    matrix_index: int,
+    service_start_minute: int | None = None,
+) -> RoutePoint:
+    if matrix_index == 0:
+        return RoutePoint(kind="depot", id=problem.depot.id, matrix_index=0)
 
-        distance_matrix = [[0] * n for _ in range(n)]
-        duration_matrix = [[0] * n for _ in range(n)]
+    delivery = problem.deliveries[matrix_index - 1]
+    if service_start_minute is None:
+        raise RuntimeError("Faltou horário de atendimento para uma entrega")
+    return RoutePoint(
+        kind="delivery",
+        id=delivery.id,
+        matrix_index=matrix_index,
+        service_start_minute=service_start_minute,
+        service_end_minute=service_start_minute + DELIVERY_SERVICE_DURATION_MINUTES,
+    )
 
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    dist_m = haversine_distance(
-                        all_locations[i].latitude, all_locations[i].longitude,
-                        all_locations[j].latitude, all_locations[j].longitude
-                    )
-                    distance_matrix[i][j] = int(dist_m)
-                    duration_matrix[i][j] = max(1, int(dist_m / 500))  # ~30 km/h = 500 m/min
 
-        demands = [0] + [d.demand for d in problem.deliveries]
-        vehicle_capacities = [v.capacity for v in problem.vehicles]
-        service_times = [0] + [d.service_time_min for d in problem.deliveries]
+def _extract_routes(
+    problem: Problem,
+    distance_matrix: list[list[int]],
+    duration_matrix: list[list[int]],
+    manager: pywrapcp.RoutingIndexManager,
+    routing: pywrapcp.RoutingModel,
+    solution: pywrapcp.Assignment,
+) -> tuple[VehicleRoute, ...]:
+    routes = []
+    for vehicle_index, vehicle in enumerate(problem.vehicles):
+        points = []
+        load = 0
+        distance_meters = 0
+        departure_minute = problem.operating_hours.start_minute
+        previous_finish = departure_minute
+        previous_matrix_index = 0
+        routing_index = routing.Start(vehicle_index)
 
-        time_windows = []
-        for d in problem.deliveries:
-            if d.time_window_start and d.time_window_end:
-                start = time_to_minutes(d.time_window_start)
-                end = time_to_minutes(d.time_window_end)
-                if end <= start:
-                    end += 24 * 60
-                time_windows.append((start, end))
-            else:
-                work_start = time_to_minutes(problem.work_start)
-                work_end = time_to_minutes(problem.work_end)
-                if work_end <= work_start:
-                    work_end += 24 * 60
-                time_windows.append((work_start, work_end))
-
-        manager = pywrapcp.RoutingIndexManager(n, len(problem.vehicles), 0)
-        routing = pywrapcp.RoutingModel(manager)
-
-        def distance_callback(from_idx: int, to_idx: int) -> int:
-            from_node = manager.IndexToNode(from_idx)
-            to_node = manager.IndexToNode(to_idx)
-            return distance_matrix[from_node][to_node]
-
-        transit_idx = routing.RegisterTransitCallback(distance_callback)
-        routing.SetArcCostEvaluatorOfAllVehicles(transit_idx)
-
-        def demand_callback(from_idx: int) -> int:
-            from_node = manager.IndexToNode(from_idx)
-            return demands[from_node]
-
-        demand_idx = routing.RegisterUnaryTransitCallback(demand_callback)
-        routing.AddDimensionWithVehicleCapacity(
-            demand_idx, 0, vehicle_capacities, True, "Capacity"
-        )
-
-        def time_callback(from_idx: int, to_idx: int) -> int:
-            from_node = manager.IndexToNode(from_idx)
-            to_node = manager.IndexToNode(to_idx)
-            return duration_matrix[from_node][to_node] + service_times[from_node]
-
-        time_idx = routing.RegisterTransitCallback(time_callback)
-        routing.AddDimension(
-            time_idx,
-            24 * 60,
-            24 * 60,
-            False,
-            "Time",
-        )
-        time_dim = routing.GetDimensionOrDie("Time")
-
-        work_start_min = time_to_minutes(problem.work_start)
-        work_end_min = time_to_minutes(problem.work_end)
-        if work_end_min <= work_start_min:
-            work_end_min += 24 * 60
-
-        time_dim.CumulVar(manager.NodeToIndex(0)).SetRange(work_start_min, work_end_min)
-
-        for i, (start, end) in enumerate(time_windows):
-            index = manager.NodeToIndex(i + 1)
-            service_time = service_times[i + 1]
-            latest_arrival = end - service_time
-            latest_arrival = max(latest_arrival, start)
-            time_dim.CumulVar(index).SetRange(start, latest_arrival)
-
-            delivery = problem.deliveries[i]
-            if delivery.time_window_start and delivery.time_window_end:
-                arrival_var = time_dim.CumulVar(index)
-                departure_var = arrival_var + service_time
-                end_min = time_to_minutes(delivery.time_window_end)
-                if end_min <= time_to_minutes(delivery.time_window_start):
-                    end_min += 24 * 60
-                routing.solver().Add(departure_var <= end_min)
-
-        for v in range(len(problem.vehicles)):
-            start_idx = routing.Start(v)
-            end_idx = routing.End(v)
-            time_dim.CumulVar(start_idx).SetRange(work_start_min, work_end_min)
-            time_dim.CumulVar(end_idx).SetRange(work_start_min, work_end_min)
-
-        for i in range(1, n):
-            routing.AddDisjunction([manager.NodeToIndex(i)], 100000)
-
-        search_params = pywrapcp.DefaultRoutingSearchParameters()
-        search_params.first_solution_strategy = self.first_solution_strategy
-        search_params.time_limit.seconds = self.time_limit
-        search_params.log_search = False
-
-        solution = routing.SolveWithParameters(search_params)
-        solve_time_ms = int((time_module.time() - start_time) * 1000)
-
-        if not solution:
-            return Solution(
-                routes=[],
-                unassigned=list(problem.deliveries),
-                status=SolveStatus.INFEASIBLE,
-                solve_time_ms=solve_time_ms,
-            )
-
-        routes = []
-        unassigned_ids = set(range(len(problem.deliveries)))
-
-        for v_idx in range(len(problem.vehicles)):
-            index = routing.Start(v_idx)
-            route_stops = []
-            route_distance = 0
-            route_load = 0
-            sequence = 0
-
-            while not routing.IsEnd(index):
-                node = manager.IndexToNode(index)
-                time_var = time_dim.CumulVar(index)
-                arrival_min = solution.Value(time_var)
-                arrival = minutes_to_time(arrival_min)
-                departure_min = arrival_min + service_times[node]
-                departure = minutes_to_time(departure_min)
-
-                if node == 0:
-                    route_stops.append(Stop(
-                        delivery_id=None,
-                        location=problem.depot.location,
-                        sequence=sequence,
-                        arrival_time=arrival,
-                        departure_time=departure,
-                        load_after=route_load,
-                        is_depot=True,
-                    ))
-                else:
-                    d_idx = node - 1
-                    delivery = problem.deliveries[d_idx]
-                    route_load += delivery.demand
-                    unassigned_ids.discard(d_idx)
-                    route_stops.append(Stop(
-                        delivery_id=delivery.id,
-                        location=delivery.location,
-                        sequence=sequence,
-                        arrival_time=arrival,
-                        departure_time=departure,
-                        load_after=route_load,
-                        is_depot=False,
-                    ))
-
-                sequence += 1
-                prev = index
-                index = solution.Value(routing.NextVar(index))
-                prev_node = manager.IndexToNode(prev)
-                curr_node = manager.IndexToNode(index)
-                route_distance += distance_matrix[prev_node][curr_node]
-
-            node = manager.IndexToNode(index)
-            time_var = time_dim.CumulVar(index)
-            arrival_min = solution.Value(time_var)
-            arrival = minutes_to_time(arrival_min)
-            route_stops.append(Stop(
-                delivery_id=None,
-                location=problem.depot.location,
-                sequence=sequence,
-                arrival_time=arrival,
-                departure_time=arrival,
-                load_after=0,
-                is_depot=True,
-            ))
-
-            if len(route_stops) > 2:
-                total_drive_time = 0
-                for i in range(len(route_stops) - 1):
-                    from_stop = route_stops[i]
-                    to_stop = route_stops[i + 1]
-                    from_node_idx = 0 if from_stop.is_depot else (
-                        [d.id for d in problem.deliveries].index(from_stop.delivery_id) + 1
-                    )
-                    to_node_idx = 0 if to_stop.is_depot else (
-                        [d.id for d in problem.deliveries].index(to_stop.delivery_id) + 1
-                    )
-                    total_drive_time += duration_matrix[from_node_idx][to_node_idx]
-
-                total_service_time = sum(
-                    d.service_time_min
-                    for d in problem.deliveries
-                    if d.id in [s.delivery_id for s in route_stops if s.delivery_id]
+        while True:
+            matrix_index = manager.IndexToNode(routing_index)
+            if routing.IsEnd(routing_index):
+                points.append(_point_for_index(problem, matrix_index))
+                return_minute = (
+                    previous_finish
+                    + duration_matrix[previous_matrix_index][matrix_index]
                 )
-                routes.append(Route(
-                    vehicle_id=problem.vehicles[v_idx].id,
-                    stops=route_stops,
-                    total_distance_m=route_distance,
-                    total_duration_min=total_drive_time + total_service_time,
-                    total_load=route_load,
-                ))
+                break
 
-        unassigned = [problem.deliveries[i] for i in unassigned_ids]
+            if matrix_index == 0:
+                points.append(_point_for_index(problem, matrix_index))
+            else:
+                delivery = problem.deliveries[matrix_index - 1]
+                arrival_minute = (
+                    previous_finish
+                    + duration_matrix[previous_matrix_index][matrix_index]
+                )
+                service_start_minute = max(
+                    arrival_minute,
+                    delivery.time_window.start_minute,
+                )
+                service_end_minute = (
+                    service_start_minute + DELIVERY_SERVICE_DURATION_MINUTES
+                )
+                if service_end_minute > delivery.time_window.end_minute:
+                    raise RuntimeError(
+                        "A rota encontrada não admite uma programação concreta"
+                    )
+                points.append(
+                    _point_for_index(problem, matrix_index, service_start_minute)
+                )
+                previous_finish = service_end_minute
 
-        status = SolveStatus.OPTIMAL
-        if unassigned:
-            status = SolveStatus.FEASIBLE
+            next_routing_index = solution.Value(routing.NextVar(routing_index))
+            next_matrix_index = manager.IndexToNode(next_routing_index)
+            distance_meters += distance_matrix[matrix_index][next_matrix_index]
+            if matrix_index != 0:
+                load += problem.deliveries[matrix_index - 1].demand
+            previous_matrix_index = matrix_index
+            routing_index = next_routing_index
 
-        return Solution(
-            routes=routes,
-            unassigned=unassigned,
-            status=status,
-            solve_time_ms=solve_time_ms,
+        routes.append(
+            VehicleRoute(
+                vehicle_id=vehicle.id,
+                points=tuple(points),
+                load=load,
+                distance_meters=distance_meters,
+                departure_minute=departure_minute,
+                return_minute=return_minute,
+            )
         )
+
+    return tuple(routes)
+
+
+def solve_routes(
+    problem: Problem,
+    distance_matrix: object,
+    duration_matrix: object,
+    *,
+    time_limit_seconds: int = 1,
+) -> SolveResult:
+    """Solve a distance-minimizing CVRP with operating hours and delivery windows.
+
+    Both matrices use positions ``[depot, *problem.deliveries]``. The distance
+    matrix is in meters and remains the only optimization objective; the
+    duration matrix is in integer minutes and supplies temporal constraints.
+    Delivery cumul values represent service starts. The returned schedule is
+    reconstructed from the operating-day opening, waiting before service when
+    needed; this does not add a time objective.
+    """
+    validated_distance_matrix = validate_distance_matrix(distance_matrix, problem)
+    validated_duration_matrix = validate_duration_matrix(duration_matrix, problem)
+    if type(time_limit_seconds) is not int or time_limit_seconds <= 0:
+        raise ValueError("time_limit_seconds deve ser um inteiro positivo")
+
+    node_count = len(validated_distance_matrix)
+    vehicle_count = len(problem.vehicles)
+    manager = pywrapcp.RoutingIndexManager(node_count, vehicle_count, 0)
+    routing = pywrapcp.RoutingModel(manager)
+
+    def distance_callback(from_index: int, to_index: int) -> int:
+        from_node = manager.IndexToNode(from_index)
+        to_node = manager.IndexToNode(to_index)
+        return validated_distance_matrix[from_node][to_node]
+
+    distance_callback_index = routing.RegisterTransitCallback(distance_callback)
+    routing.SetArcCostEvaluatorOfAllVehicles(distance_callback_index)
+
+    demands = [0, *(delivery.demand for delivery in problem.deliveries)]
+
+    def demand_callback(from_index: int) -> int:
+        from_node = manager.IndexToNode(from_index)
+        return demands[from_node]
+
+    demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
+    routing.AddDimensionWithVehicleCapacity(
+        demand_callback_index,
+        0,
+        [vehicle.capacity for vehicle in problem.vehicles],
+        True,
+        "Capacity",
+    )
+
+    def duration_callback(from_index: int, to_index: int) -> int:
+        from_node = manager.IndexToNode(from_index)
+        to_node = manager.IndexToNode(to_index)
+        travel_minutes = validated_duration_matrix[from_node][to_node]
+        service_minutes = 0 if from_node == 0 else DELIVERY_SERVICE_DURATION_MINUTES
+        return service_minutes + travel_minutes
+
+    duration_callback_index = routing.RegisterTransitCallback(duration_callback)
+    opening_minute = problem.operating_hours.start_minute
+    closing_minute = problem.operating_hours.end_minute
+    routing.AddDimension(
+        duration_callback_index,
+        closing_minute - opening_minute,
+        closing_minute,
+        False,
+        "Time",
+    )
+    time_dimension = routing.GetDimensionOrDie("Time")
+
+    for delivery_index, delivery in enumerate(problem.deliveries, start=1):
+        service_start = time_dimension.CumulVar(manager.NodeToIndex(delivery_index))
+        service_start.SetRange(
+            delivery.time_window.start_minute,
+            delivery.time_window.end_minute - DELIVERY_SERVICE_DURATION_MINUTES,
+        )
+
+    for vehicle_index in range(vehicle_count):
+        start_time = time_dimension.CumulVar(routing.Start(vehicle_index))
+        return_time = time_dimension.CumulVar(routing.End(vehicle_index))
+        start_time.SetRange(opening_minute, closing_minute)
+        return_time.SetRange(opening_minute, closing_minute)
+
+    search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+    search_parameters.first_solution_strategy = (
+        routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    )
+    search_parameters.local_search_metaheuristic = (
+        routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+    )
+    search_parameters.time_limit.seconds = time_limit_seconds
+
+    solution = routing.SolveWithParameters(search_parameters)
+    status_code = routing.status()
+    if solution is None:
+        return SolveResult(
+            status=_status_without_solution(status_code),
+            routes=None,
+            total_distance_meters=None,
+            ortools_status_code=status_code,
+        )
+
+    routes = _extract_routes(
+        problem,
+        validated_distance_matrix,
+        validated_duration_matrix,
+        manager,
+        routing,
+        solution,
+    )
+    _verify_schedule(problem, validated_duration_matrix, routes)
+    return SolveResult(
+        status=SolverStatus.SOLUTION_FOUND,
+        routes=routes,
+        total_distance_meters=sum(route.distance_meters for route in routes),
+        ortools_status_code=status_code,
+    )
+
+
+def _verify_schedule(
+    problem: Problem,
+    duration_matrix: list[list[int]],
+    routes: tuple[VehicleRoute, ...],
+) -> None:
+    """Check the concrete schedule extracted from the OR-Tools assignment."""
+    opening_minute = problem.operating_hours.start_minute
+    closing_minute = problem.operating_hours.end_minute
+    seen_delivery_indices = []
+
+    for route in routes:
+        if not opening_minute <= route.departure_minute <= closing_minute:
+            raise RuntimeError("Partida fora do expediente")
+        if not opening_minute <= route.return_minute <= closing_minute:
+            raise RuntimeError("Retorno fora do expediente")
+
+        previous_point = route.points[0]
+        previous_finish = route.departure_minute
+        if previous_point.kind != "depot":
+            raise RuntimeError("Rota deve começar no depósito")
+
+        for point in route.points[1:]:
+            earliest_time = (
+                previous_finish
+                + duration_matrix[previous_point.matrix_index][point.matrix_index]
+            )
+            if point.kind == "delivery":
+                if (
+                    point.service_start_minute is None
+                    or point.service_end_minute is None
+                ):
+                    raise RuntimeError("Entrega sem horário concreto de atendimento")
+                delivery = problem.deliveries[point.matrix_index - 1]
+                if point.service_end_minute != (
+                    point.service_start_minute + DELIVERY_SERVICE_DURATION_MINUTES
+                ):
+                    raise RuntimeError("Duração de atendimento inconsistente")
+                if point.service_start_minute < earliest_time:
+                    raise RuntimeError("Atendimento começa antes da chegada possível")
+                if (
+                    point.service_start_minute < delivery.time_window.start_minute
+                    or point.service_end_minute > delivery.time_window.end_minute
+                ):
+                    raise RuntimeError("Atendimento fora da janela efetiva")
+                seen_delivery_indices.append(point.matrix_index)
+                previous_finish = point.service_end_minute
+            else:
+                if (
+                    point.service_start_minute is not None
+                    or point.service_end_minute is not None
+                ):
+                    raise RuntimeError("Depósito não pode ter horário de atendimento")
+                if point is not route.points[-1]:
+                    raise RuntimeError("A rota só pode retornar ao depósito no final")
+                if route.return_minute < earliest_time:
+                    raise RuntimeError("Retorno antes do tempo mínimo de viagem")
+                previous_finish = route.return_minute
+            previous_point = point
+
+        if route.points[-1].kind != "depot":
+            raise RuntimeError("Rota deve terminar no depósito")
+
+    expected_delivery_indices = list(range(1, len(problem.deliveries) + 1))
+    if sorted(seen_delivery_indices) != expected_delivery_indices:
+        raise RuntimeError("A solução não atende cada entrega exatamente uma vez")

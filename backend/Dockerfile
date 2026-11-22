@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+WORKDIR /app/backend
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -12,10 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml .
+COPY route_engine /app/route_engine
+COPY backend/pyproject.toml ./pyproject.toml
 RUN pip install --upgrade pip && pip install -e ".[dev]"
 
-COPY . .
+COPY backend .
 
 EXPOSE 8000
 

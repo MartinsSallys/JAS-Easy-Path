@@ -1,3 +1,11 @@
-from route_engine.optimizer.ortools_solver import RouteEngine
+"""Route optimization adapters."""
 
-__all__ = ["RouteEngine"]
+from route_engine.optimizer.ortools_solver import solve_routes
+from route_engine.optimizer.results import (
+    RoutePoint,
+    SolveResult,
+    SolverStatus,
+    VehicleRoute,
+)
+
+__all__ = ["RoutePoint", "SolveResult", "SolverStatus", "VehicleRoute", "solve_routes"]

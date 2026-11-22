@@ -1,163 +1,249 @@
-import contextlib
-from datetime import time
+import math
+import time as time_module
+from typing import Protocol
+
+from route_engine import (
+    SolveResult,
+    SolverStatus,
+    ValidationError,
+    VehicleRoute,
+    solve_routes,
+    validate_problem,
+)
 
 from app.core.config import settings
 from app.schemas import (
-    OptimizationDelivery,
     OptimizationLocation,
     OptimizationRequest,
     OptimizationResponse,
-    OptimizationVehicle,
     RouteResult,
     StopResult,
 )
 
-try:
-    from route_engine import (
-        Delivery,
-        Depot,
-        Location,
-        Problem,
-        Route,
-        RouteEngine,
-        Solution,
-        SolveStatus,
-        Stop,
-        Vehicle,
-        time_to_minutes,
-    )
-except ImportError:
-    Depot = None
-    Delivery = None
-    Location = None
-    Problem = None
-    RouteEngine = None
-    Solution = None
-    SolveStatus = None
-    Stop = None
-    Vehicle = None
-    time_to_minutes = None
-    Route = None
+OPERATING_HOURS = {"start": "08:00", "end": "18:00"}
+"""Expediente fixo do MVP (limitação conhecida, ver docs/arquitetura-mvp.md)."""
+
+AVERAGE_SPEED_M_PER_MIN = 500.0
+"""Velocidade média assumida (~30 km/h) para derivar duração da distância."""
+
+METERS_PER_KM = 1000
+
+MIN_ROUTE_POINTS = 3
+"""Depósito na saída + ao menos uma entrega + depósito no retorno."""
+
+
+def _haversine_m(origin: OptimizationLocation, destination: OptimizationLocation) -> float:
+    earth_radius_m = 6_371_000.0
+    lat1 = math.radians(origin.latitude)
+    lon1 = math.radians(origin.longitude)
+    lat2 = math.radians(destination.latitude)
+    lon2 = math.radians(destination.longitude)
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return earth_radius_m * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _minutes_to_hhmm(minute: int | None) -> str | None:
+    if minute is None:
+        return None
+    return f"{(minute // 60) % 24:02d}:{minute % 60:02d}"
+
+
+class MatrixProvider(Protocol):
+    """Fonte das matrizes de custo exigidas pelo motor.
+
+    Recebe as localizações na ordem ``[depot, *deliveries]`` e retorna
+    ``(distancia_metros, duracao_minutos)``, ambas N x N de inteiros.
+    """
+
+    def build(
+        self, locations: list[OptimizationLocation]
+    ) -> tuple[list[list[int]], list[list[int]]]: ...
+
+
+class HaversineMatrixProvider:
+    """Matrizes por distância em linha reta; duração derivada da distância.
+
+    Determinístico e sem dependência externa. Pode ser substituído por um
+    provedor baseado em serviço de rotas (ex.: OpenRouteService) sem alterar
+    o adapter nem o endpoint.
+    """
+
+    def build(
+        self, locations: list[OptimizationLocation]
+    ) -> tuple[list[list[int]], list[list[int]]]:
+        size = len(locations)
+        distances = [[0] * size for _ in range(size)]
+        durations = [[0] * size for _ in range(size)]
+        for i, origin in enumerate(locations):
+            for j, destination in enumerate(locations):
+                if i == j:
+                    continue
+                meters = _haversine_m(origin, destination)
+                distances[i][j] = int(meters)
+                durations[i][j] = max(1, round(meters / AVERAGE_SPEED_M_PER_MIN))
+        return distances, durations
 
 
 class RouteEngineAdapter:
-    def __init__(self) -> None:
-        if RouteEngine is None:
-            raise RuntimeError("route_engine not available. Install route_engine package.")
-        self.engine = RouteEngine(
-            time_limit_seconds=settings.ortools_time_limit_seconds,
-            first_solution_strategy=settings.ortools_first_solution_strategy,
-        )
+    """Adapta o contrato da API para o motor ``validate_problem``/``solve_routes``.
 
-    def _to_engine_location(self, loc: OptimizationLocation) -> Location:
-        return Location(
-            latitude=loc.latitude,
-            longitude=loc.longitude,
-            address=loc.address,
-        )
+    O motor aplica capacidade, expediente (fixo 08:00–18:00 no MVP) e janelas
+    de entrega com 8 minutos de atendimento concluído dentro da janela.
+    Não há atribuição parcial: ou todas as entregas são atendidas ou a
+    resposta é ``infeasible`` — ``unassigned`` só aparece nesse caso.
+    """
 
-    def _to_engine_depot(self, depot: OptimizationLocation) -> Depot:
-        return Depot(id=0, location=self._to_engine_location(depot))
-
-    def _to_engine_vehicle(self, v: OptimizationVehicle) -> Vehicle:
-        return Vehicle(id=v.id, capacity=v.capacity)
-
-    def _to_engine_delivery(self, d: OptimizationDelivery) -> Delivery:
-        tw_start = None
-        tw_end = None
-        if d.time_window_start:
-            with contextlib.suppress(ValueError):
-                tw_start = time.fromisoformat(d.time_window_start)
-        if d.time_window_end:
-            with contextlib.suppress(ValueError):
-                tw_end = time.fromisoformat(d.time_window_end)
-        return Delivery(
-            id=d.id,
-            demand=d.demand,
-            location=self._to_engine_location(d.location),
-            time_window_start=tw_start,
-            time_window_end=tw_end,
-            service_time_min=8,
-        )
-
-    def _to_engine_problem(self, request: OptimizationRequest) -> Problem:
-        work_start = time(8, 0)
-        work_end = time(18, 0)
-        if request.options and request.options.time_limit_seconds:
-            pass
-        return Problem(
-            depot=self._to_engine_depot(request.depot),
-            vehicles=tuple(self._to_engine_vehicle(v) for v in request.vehicles),
-            deliveries=tuple(self._to_engine_delivery(d) for d in request.deliveries),
-            work_start=work_start,
-            work_end=work_end,
-        )
-
-    def _from_engine_stop(self, stop: Stop, depot_loc: OptimizationLocation) -> StopResult:
-        return StopResult(
-            delivery_id=stop.delivery_id,
-            location=OptimizationLocation(
-                latitude=stop.location.latitude,
-                longitude=stop.location.longitude,
-                address=stop.location.address,
-            ),
-            sequence=stop.sequence,
-            arrival_time=stop.arrival_time.isoformat() if stop.arrival_time else None,
-            departure_time=stop.departure_time.isoformat() if stop.departure_time else None,
-            load_after=stop.load_after,
-        )
-
-    def _from_engine_route(
-        self, route: Route, depot_loc: OptimizationLocation
-    ) -> RouteResult:
-        return RouteResult(
-            vehicle_id=route.vehicle_id,
-            stops=[self._from_engine_stop(s, depot_loc) for s in route.stops],
-            total_distance_km=round(route.total_distance_m / 1000, 2),
-            total_duration_min=route.total_duration_min,
-            total_load=route.total_load,
-        )
-
-    def _from_engine_solution(
-        self, solution: Solution, request: OptimizationRequest
-    ) -> OptimizationResponse:
-        unassigned = [
-            OptimizationDelivery(
-                id=d.id,
-                demand=d.demand,
-                location=OptimizationLocation(
-                    latitude=d.location.latitude,
-                    longitude=d.location.longitude,
-                    address=d.location.address,
-                ),
-                time_window_start=(
-                    d.time_window_start.isoformat() if d.time_window_start else None
-                ),
-                time_window_end=(
-                    d.time_window_end.isoformat() if d.time_window_end else None
-                ),
-            )
-            for d in solution.unassigned
-        ]
-
-        status_map = {
-            SolveStatus.OPTIMAL: "optimal",
-            SolveStatus.FEASIBLE: "feasible",
-            SolveStatus.INFEASIBLE: "infeasible",
-            SolveStatus.TIMEOUT: "timeout",
-        }
-
-        return OptimizationResponse(
-            routes=[self._from_engine_route(r, request.depot) for r in solution.routes],
-            unassigned=unassigned,
-            status=status_map.get(solution.status, "unknown"),
-            solve_time_ms=solution.solve_time_ms,
+    def __init__(
+        self,
+        matrix_provider: MatrixProvider | None = None,
+        time_limit_seconds: int | None = None,
+    ) -> None:
+        self.matrix_provider = matrix_provider or HaversineMatrixProvider()
+        self.time_limit_seconds = (
+            time_limit_seconds or settings.ortools_time_limit_seconds
         )
 
     def solve(self, request: OptimizationRequest) -> OptimizationResponse:
-        problem = self._to_engine_problem(request)
-        solution = self.engine.solve(problem)
-        return self._from_engine_solution(solution, request)
+        started = time_module.monotonic()
+        try:
+            problem = validate_problem(self._raw_problem(request))
+        except ValidationError:
+            return self._infeasible(request, started)
+
+        locations = [request.depot, *(d.location for d in request.deliveries)]
+        distance_m, duration_min = self.matrix_provider.build(locations)
+
+        time_limit = self.time_limit_seconds
+        if request.options is not None:
+            time_limit = request.options.time_limit_seconds
+
+        try:
+            result = solve_routes(
+                problem,
+                distance_m,
+                duration_min,
+                time_limit_seconds=time_limit,
+            )
+        except (ValidationError, RuntimeError):
+            return self._infeasible(request, started)
+
+        return self._from_result(result, request, started)
+
+    def _raw_problem(self, request: OptimizationRequest) -> dict:
+        deliveries = []
+        for delivery in request.deliveries:
+            raw = {
+                "id": delivery.id,
+                "demand": delivery.demand,
+                "location": {
+                    "latitude": delivery.location.latitude,
+                    "longitude": delivery.location.longitude,
+                    "address": delivery.location.address,
+                },
+            }
+            if delivery.time_window_start and delivery.time_window_end:
+                raw["time_window"] = {
+                    "start": delivery.time_window_start,
+                    "end": delivery.time_window_end,
+                }
+            deliveries.append(raw)
+
+        return {
+            "operating_hours": OPERATING_HOURS,
+            "depot": {
+                "id": 0,
+                "location": {
+                    "latitude": request.depot.latitude,
+                    "longitude": request.depot.longitude,
+                    "address": request.depot.address,
+                },
+            },
+            "vehicles": [
+                {"id": vehicle.id, "capacity": vehicle.capacity}
+                for vehicle in request.vehicles
+            ],
+            "deliveries": deliveries,
+        }
+
+    def _infeasible(
+        self, request: OptimizationRequest, started: float
+    ) -> OptimizationResponse:
+        return OptimizationResponse(
+            routes=[],
+            unassigned=list(request.deliveries),
+            status="infeasible",
+            solve_time_ms=self._elapsed_ms(started),
+        )
+
+    def _from_result(
+        self,
+        result: SolveResult,
+        request: OptimizationRequest,
+        started: float,
+    ) -> OptimizationResponse:
+        if result.status is not SolverStatus.SOLUTION_FOUND or not result.routes:
+            return self._infeasible(request, started)
+
+        routes = [
+            self._from_route(route, request)
+            for route in result.routes
+            if len(route.points) >= MIN_ROUTE_POINTS
+        ]
+        return OptimizationResponse(
+            routes=routes,
+            unassigned=[],
+            status="feasible",
+            solve_time_ms=self._elapsed_ms(started),
+        )
+
+    def _from_route(
+        self, route: VehicleRoute, request: OptimizationRequest
+    ) -> RouteResult:
+        deliveries_by_id = {d.id: d for d in request.deliveries}
+        stops: list[StopResult] = []
+        load = 0
+        for sequence, point in enumerate(route.points):
+            if point.kind == "depot":
+                is_return = sequence == len(route.points) - 1
+                minute = (
+                    route.return_minute if is_return else route.departure_minute
+                )
+                stops.append(
+                    StopResult(
+                        delivery_id=None,
+                        location=request.depot,
+                        sequence=sequence,
+                        arrival_time=_minutes_to_hhmm(minute),
+                        departure_time=_minutes_to_hhmm(minute),
+                        load_after=0 if is_return else load,
+                    )
+                )
+            else:
+                delivery = deliveries_by_id[point.id]
+                load += delivery.demand
+                stops.append(
+                    StopResult(
+                        delivery_id=point.id,
+                        location=delivery.location,
+                        sequence=sequence,
+                        arrival_time=_minutes_to_hhmm(point.service_start_minute),
+                        departure_time=_minutes_to_hhmm(point.service_end_minute),
+                        load_after=load,
+                    )
+                )
+
+        return RouteResult(
+            vehicle_id=route.vehicle_id,
+            stops=stops,
+            total_distance_km=round(route.distance_meters / METERS_PER_KM, 2),
+            total_duration_min=route.return_minute - route.departure_minute,
+            total_load=load,
+        )
+
+    def _elapsed_ms(self, started: float) -> int:
+        return int((time_module.monotonic() - started) * 1000)
 
 
 _optimizer_holder: dict = {"instance": None}
