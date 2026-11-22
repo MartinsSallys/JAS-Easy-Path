@@ -9,7 +9,7 @@ export const CSV_TEMPLATE =
 const REQUIRED_COLUMNS = ["cliente", "endereco"];
 
 export interface CsvRow {
-  line: number;
+  line: number; 
   delivery: NewDelivery;
   errors: string[];
 }
@@ -36,6 +36,7 @@ export function parseDeliveriesCsv(text: string): CsvParseResult {
   const parsed = Papa.parse<Record<string, string>>(text, {
     header: true,
     skipEmptyLines: "greedy",
+    // remove o BOM invisível que o Excel coloca no início do arquivo
     transformHeader: (header) => header.replace(/^\uFEFF/, "").trim().toLowerCase(),
   });
 
@@ -45,13 +46,15 @@ export function parseDeliveriesCsv(text: string): CsvParseResult {
     return { rows: [], fileError: `Colunas obrigatórias ausentes: ${missing.join(", ")}.` };
   }
 
-  // Agrupa erros estruturais do PapaParse (ex.: aspas sem fechar ou colunas extras/faltando)
   const parserErrorsByRow = new Map<number, string[]>();
   const globalParserErrors: string[] = [];
 
   for (const err of parsed.errors) {
     const detail = `Erro de estrutura CSV (${err.code}): ${err.message}`;
-    if (typeof err.row === "number") {
+    const hasValidRowIndex =
+      typeof err.row === "number" && err.row >= 0 && err.row < parsed.data.length;
+
+    if (hasValidRowIndex && typeof err.row === "number") {
       const list = parserErrorsByRow.get(err.row) ?? [];
       list.push(detail);
       parserErrorsByRow.set(err.row, list);
