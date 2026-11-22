@@ -20,7 +20,7 @@ async def calculate_matrix(
             {"latitude": loc["latitude"], "longitude": loc["longitude"]}
             for loc in request.locations
         ]
-        return await matrix_service.get_matrix_chunked(
+        return await matrix_service.get_matrix(
             locations=locations,
             metrics=request.metrics,
             profile=request.profile,

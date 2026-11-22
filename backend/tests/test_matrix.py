@@ -8,7 +8,7 @@ from app.services.matrix import MatrixService
 LOCATION_COUNT = 3
 EXPECTED_DISTANCE_KM = 5.2
 EXPECTED_DURATION_MIN = 8.0
-CHUNKED_LOCATION_COUNT = 51
+OVER_LIMIT_LOCATION_COUNT = 51
 
 
 @pytest.fixture
@@ -187,92 +187,16 @@ async def test_get_matrix_unknown_units_raises(matrix_service: MatrixService) ->
 
 
 @pytest.mark.asyncio
-async def test_get_matrix_chunked_under_limit(
-    matrix_service: MatrixService, mock_ors_response
-) -> None:
-    """Test chunked falls back to get_matrix when under limit."""
-    locations = [
-        {"latitude": -23.5617, "longitude": -46.6560},
-        {"latitude": -23.5505, "longitude": -46.6333},
-    ]
-
-    with patch.object(matrix_service, "get_matrix", new_callable=AsyncMock) as mock_get:
-        mock_get.return_value = MatrixResponse(
-            distances_km=[[0, 5.2], [5.2, 0]],
-            durations_min=[[0, 8.0], [8.0, 0]],
-            provider="openrouteservice",
-            cached=False,
-        )
-
-        response = await matrix_service.get_matrix_chunked(locations)
-
-    assert response.distances_km == [[0, 5.2], [5.2, 0]]
-
-
-@pytest.mark.asyncio
-async def test_get_matrix_chunked_over_limit(matrix_service: MatrixService) -> None:
-    """Test chunked matrix with 51 locations (over 50 limit)."""
-    # Create 51 locations
+async def test_get_matrix_over_limit_raises(matrix_service: MatrixService) -> None:
+    """51 locations exceed the provider cap: clear error before any request."""
     locations = [
         {"latitude": -23.5617 + i * 0.001, "longitude": -46.6560 + i * 0.001}
-        for i in range(51)
+        for i in range(OVER_LIMIT_LOCATION_COUNT)
     ]
 
-    async def mock_get_matrix(locs, metrics, profile) -> MatrixResponse:  # noqa: ANN001
-        size = len(locs)
-        distances = [[float(abs(i - j) * 1000) for j in range(size)] for i in range(size)]
-        durations = [[float(abs(i - j) * 60) for j in range(size)] for i in range(size)]
-        return MatrixResponse(
-            distances_km=[[d / 1000 for d in row] for row in distances],
-            durations_min=[[d / 60 for d in row] for row in durations],
-            provider="openrouteservice",
-            cached=False,
-        )
+    with patch.object(
+        matrix_service, "_request_matrix", new_callable=AsyncMock
+    ) as mock_request, pytest.raises(ValueError, match="Maximum 50 locations"):
+        await matrix_service.get_matrix(locations)
 
-    with patch.object(matrix_service, "get_matrix", new_callable=AsyncMock) as mock_get:
-        mock_get.side_effect = mock_get_matrix
-
-        response = await matrix_service.get_matrix_chunked(locations)
-
-    assert len(response.distances_km) == CHUNKED_LOCATION_COUNT
-    assert len(response.distances_km[0]) == CHUNKED_LOCATION_COUNT
-    assert len(response.durations_min) == CHUNKED_LOCATION_COUNT
-    assert len(response.durations_min[0]) == CHUNKED_LOCATION_COUNT
-    # Diagonal should be 0
-    for i in range(CHUNKED_LOCATION_COUNT):
-        assert response.distances_km[i][i] == 0.0
-        assert response.durations_min[i][i] == 0.0
-    # Cross-chunk entries should be filled
-    assert response.distances_km[0][50] is not None
-    assert response.distances_km[50][0] is not None
-
-
-@pytest.mark.asyncio
-async def test_get_matrix_chunked_symmetric(matrix_service: MatrixService) -> None:
-    """Test that chunked matrix produces symmetric results."""
-    locations = [
-        {"latitude": -23.5617 + i * 0.001, "longitude": -46.6560 + i * 0.001}
-        for i in range(55)
-    ]
-
-    async def mock_get_matrix(locs, metrics, profile) -> MatrixResponse:  # noqa: ANN001
-        size = len(locs)
-        distances = [[float(abs(i - j) * 1000) for j in range(size)] for i in range(size)]
-        durations = [[float(abs(i - j) * 60) for j in range(size)] for i in range(size)]
-        return MatrixResponse(
-            distances_km=[[d / 1000 for d in row] for row in distances],
-            durations_min=[[d / 60 for d in row] for row in durations],
-            provider="openrouteservice",
-            cached=False,
-        )
-
-    with patch.object(matrix_service, "get_matrix", new_callable=AsyncMock) as mock_get:
-        mock_get.side_effect = mock_get_matrix
-
-        response = await matrix_service.get_matrix_chunked(locations)
-
-    n = 55
-    for i in range(n):
-        for j in range(n):
-            assert response.distances_km[i][j] == response.distances_km[j][i]
-            assert response.durations_min[i][j] == response.durations_min[j][i]
+    mock_request.assert_not_called()

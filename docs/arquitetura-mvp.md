@@ -377,7 +377,7 @@ Body:
 | Limitation | Impact | Mitigation |
 |------------|--------|------------|
 | 40 req/min (free) | Large matrices throttled | Batch locations; cache matrices |
-| Max 50 locations/request | Large problems need chunking | Split into sub-matrices; calculate cross-chunk |
+| Max 50 locations/request | Large problems rejected at MVP | Hard cap of 50 locations per request (counting the depot); returns clear 400 error. Cross-chunk splitting deferred to a later step |
 | 2,000 req/day | Daily cap for high volume | Monitor usage; upgrade plan if needed |
 | Profile limitations | No motorcycle/van specific | Use driving-car as approximation |
 | Traffic not real-time | Static travel times | Acceptable for planning; not navigation |
@@ -394,12 +394,12 @@ class MatrixService:
         locations: list[Location],
         metrics: list[Literal["distance", "duration"]] = ["distance", "duration"]
     ) -> MatrixResult:
-        # 1. Validate location count
+        # 1. Validate location count (reject > 50, incl. depot, with clear error)
         # 2. Check cache (keyed by location hashes)
-        # 3. If > 50 locations: chunk and calculate cross-chunk
-        # 4. Request with retry/backoff
-        # 5. Validate symmetric matrix, handle nulls
-        # 6. Return structured result with metadata
+        # 3. Request with retry/backoff
+        # 4. Validate symmetric matrix, handle nulls
+        # 5. Return structured result with metadata
+        # Note: chunked splitting for > 50 locations is a deferred next step
 ```
 
 ---

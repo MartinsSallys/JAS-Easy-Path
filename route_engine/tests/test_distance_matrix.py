@@ -1,5 +1,4 @@
 import pytest
-
 from route_engine.domain.models import Problem
 from route_engine.examples.manual_distance_scenario import build_manual_scenario
 from route_engine.services.distance_matrix import validate_distance_matrix

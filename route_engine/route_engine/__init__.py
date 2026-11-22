@@ -18,12 +18,17 @@ from route_engine.optimizer import (
 )
 from route_engine.services.distance_matrix import validate_distance_matrix
 from route_engine.services.duration_matrix import validate_duration_matrix
-from route_engine.services.validator import ValidationError, validate_problem
+from route_engine.services.validator import (
+    InfeasibleProblemError,
+    ValidationError,
+    validate_problem,
+)
 
 __all__ = [
     "DELIVERY_SERVICE_DURATION_MINUTES",
     "Delivery",
     "Depot",
+    "InfeasibleProblemError",
     "Location",
     "Problem",
     "RoutePoint",

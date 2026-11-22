@@ -1,5 +1,9 @@
 
+from unittest.mock import patch
+
 import pytest
+from ortools.constraint_solver import routing_enums_pb2
+from route_engine import SolveResult, SolverStatus
 
 from app.schemas import (
     OptimizationDelivery,
@@ -289,3 +293,83 @@ def test_injected_matrix_provider_controls_route() -> None:
     assert route.total_distance_km == round(
         (distances[0][2] + distances[2][1] + distances[1][0]) / 1000, 2
     )
+
+
+def _single_delivery_request(**delivery_kwargs: object) -> OptimizationRequest:
+    depot = OptimizationLocation(latitude=-23.5617, longitude=-46.6560)
+    return OptimizationRequest(
+        depot=depot,
+        vehicles=[OptimizationVehicle(id=1, capacity=20)],
+        deliveries=[
+            OptimizationDelivery(
+                id=DELIVERY_ID,
+                demand=3,
+                location=OptimizationLocation(
+                    latitude=-23.5505, longitude=-46.6333
+                ),
+                **delivery_kwargs,
+            )
+        ],
+    )
+
+
+def test_malformed_input_is_invalid_input(optimizer: RouteEngineAdapter) -> None:
+    """Horário fora do formato HH:MM é entrada inválida, não inviabilidade."""
+    request = _single_delivery_request(
+        time_window_start="25:00", time_window_end="12:00"
+    )
+
+    response = optimizer.solve(request)
+
+    assert response.status == "invalid_input"
+    assert response.message is not None
+    assert response.routes == []
+    assert len(response.unassigned) == 1
+
+
+def test_infeasible_input_carries_reason(optimizer: RouteEngineAdapter) -> None:
+    """Janela sem espaço para o atendimento é inviabilidade comprovada."""
+    request = _single_delivery_request(
+        time_window_start="09:00", time_window_end="09:05"
+    )
+
+    response = optimizer.solve(request)
+
+    assert response.status == "infeasible"
+    assert "atendimento" in (response.message or "")
+    assert response.routes == []
+
+
+_ROUTING_STATUS = routing_enums_pb2.RoutingSearchStatus
+
+
+@pytest.mark.parametrize(
+    ("solver_status", "ortools_code", "expected"),
+    [
+        (_ROUTING_STATUS.ROUTING_INFEASIBLE, SolverStatus.INFEASIBLE, "infeasible"),
+        (_ROUTING_STATUS.ROUTING_INVALID, SolverStatus.INVALID_MODEL, "invalid_model"),
+        (_ROUTING_STATUS.ROUTING_FAIL, SolverStatus.NO_SOLUTION, "no_solution"),
+        (_ROUTING_STATUS.ROUTING_FAIL_TIMEOUT, SolverStatus.NO_SOLUTION, "timeout"),
+    ],
+)
+def test_solver_failure_statuses_are_distinct(
+    optimizer: RouteEngineAdapter,
+    solver_status: int,
+    ortools_code: SolverStatus,
+    expected: str,
+) -> None:
+    """O adapter preserva inviável, modelo inválido, sem solução e timeout."""
+    request = _single_delivery_request()
+    result = SolveResult(
+        status=ortools_code,
+        routes=None,
+        total_distance_meters=None,
+        ortools_status_code=solver_status,
+    )
+
+    with patch("app.services.optimizer.solve_routes", return_value=result):
+        response = optimizer.solve(request)
+
+    assert response.status == expected
+    assert response.routes == []
+    assert len(response.unassigned) == 1

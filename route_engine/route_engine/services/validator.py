@@ -19,6 +19,16 @@ class ValidationError(Exception):
         self.errors = errors
 
 
+class InfeasibleProblemError(ValidationError):
+    """Entrada bem formada que já é comprovadamente inviável.
+
+    Distingue dados malformados (``ValidationError``) de restrições que nenhuma
+    busca conseguiria satisfazer — janela que não comporta o atendimento, demanda
+    acima da capacidade. Continua sendo ``ValidationError`` para quem só trata o
+    caso geral.
+    """
+
+
 def _is_int(value: object) -> bool:
     return type(value) is int
 
@@ -92,7 +102,7 @@ def _delivery_time_window(
             operating_hours.end_minute,
         )
         if effective_start >= effective_end:
-            raise ValidationError(
+            raise InfeasibleProblemError(
                 [
                     _error(
                         "deliveries.time_window",
@@ -109,7 +119,7 @@ def _delivery_time_window(
         effective_window.end_minute - effective_window.start_minute
         < DELIVERY_SERVICE_DURATION_MINUTES
     ):
-        raise ValidationError(
+        raise InfeasibleProblemError(
             [
                 _error(
                     "deliveries.time_window",
@@ -263,7 +273,7 @@ def validate_problem(raw: object) -> Problem:
     )
 
     if any(delivery.demand > problem.max_capacity for delivery in problem.deliveries):
-        raise ValidationError(
+        raise InfeasibleProblemError(
             [
                 _error(
                     "deliveries.demand",
@@ -273,7 +283,7 @@ def validate_problem(raw: object) -> Problem:
         )
 
     if problem.total_demand > problem.total_capacity:
-        raise ValidationError(
+        raise InfeasibleProblemError(
             [_error("vehicles", "Capacidade insuficiente para atender a demanda")]
         )
 

@@ -2,7 +2,6 @@ from collections import Counter
 
 import pytest
 from ortools.constraint_solver import routing_enums_pb2
-
 from route_engine.domain.constraints import DELIVERY_SERVICE_DURATION_MINUTES
 from route_engine.domain.models import Problem
 from route_engine.examples.manual_distance_scenario import build_manual_scenario

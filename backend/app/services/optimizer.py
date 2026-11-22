@@ -2,7 +2,9 @@ import math
 import time as time_module
 from typing import Protocol
 
+from ortools.constraint_solver import routing_enums_pb2
 from route_engine import (
+    InfeasibleProblemError,
     SolveResult,
     SolverStatus,
     ValidationError,
@@ -92,7 +94,13 @@ class RouteEngineAdapter:
     O motor aplica capacidade, expediente (fixo 08:00–18:00 no MVP) e janelas
     de entrega com 8 minutos de atendimento concluído dentro da janela.
     Não há atribuição parcial: ou todas as entregas são atendidas ou a
-    resposta é ``infeasible`` — ``unassigned`` só aparece nesse caso.
+    resposta é um status de falha — ``unassigned`` só aparece nesses casos.
+
+    Status possíveis: ``feasible`` (solução), ``invalid_input`` (dados
+    malformados), ``infeasible`` (inviabilidade comprovada na validação ou
+    pelo solver), ``no_solution`` (busca encerrada sem solução), ``timeout``
+    (busca encerrada pelo limite de tempo) e ``invalid_model`` (modelo ou
+    matriz rejeitados pelo solver).
     """
 
     def __init__(
@@ -109,8 +117,10 @@ class RouteEngineAdapter:
         started = time_module.monotonic()
         try:
             problem = validate_problem(self._raw_problem(request))
-        except ValidationError:
-            return self._infeasible(request, started)
+        except InfeasibleProblemError as exc:
+            return self._failed(request, started, "infeasible", exc)
+        except ValidationError as exc:
+            return self._failed(request, started, "invalid_input", exc)
 
         locations = [request.depot, *(d.location for d in request.deliveries)]
         distance_m, duration_min = self.matrix_provider.build(locations)
@@ -126,8 +136,8 @@ class RouteEngineAdapter:
                 duration_min,
                 time_limit_seconds=time_limit,
             )
-        except (ValidationError, RuntimeError):
-            return self._infeasible(request, started)
+        except ValidationError as exc:
+            return self._failed(request, started, "invalid_model", exc)
 
         return self._from_result(result, request, started)
 
@@ -167,15 +177,34 @@ class RouteEngineAdapter:
             "deliveries": deliveries,
         }
 
-    def _infeasible(
-        self, request: OptimizationRequest, started: float
+    def _failed(
+        self,
+        request: OptimizationRequest,
+        started: float,
+        status: str,
+        exc: ValidationError | None = None,
     ) -> OptimizationResponse:
+        message = exc.errors[0]["message"] if exc is not None and exc.errors else None
         return OptimizationResponse(
             routes=[],
             unassigned=list(request.deliveries),
-            status="infeasible",
+            status=status,
             solve_time_ms=self._elapsed_ms(started),
+            message=message,
         )
+
+    @staticmethod
+    def _failure_status(result: SolveResult) -> str:
+        if result.status is SolverStatus.INFEASIBLE:
+            return "infeasible"
+        if result.status is SolverStatus.INVALID_MODEL:
+            return "invalid_model"
+        if (
+            result.ortools_status_code
+            == routing_enums_pb2.RoutingSearchStatus.ROUTING_FAIL_TIMEOUT
+        ):
+            return "timeout"
+        return "no_solution"
 
     def _from_result(
         self,
@@ -184,7 +213,7 @@ class RouteEngineAdapter:
         started: float,
     ) -> OptimizationResponse:
         if result.status is not SolverStatus.SOLUTION_FOUND or not result.routes:
-            return self._infeasible(request, started)
+            return self._failed(request, started, self._failure_status(result))
 
         routes = [
             self._from_route(route, request)

@@ -157,7 +157,10 @@ class MatrixService:
             metrics = ["distance", "duration"]
 
         if len(locations) > self.max_locations:
-            raise ValueError(f"Maximum {self.max_locations} locations allowed per request")
+            raise ValueError(
+                f"Maximum {self.max_locations} locations allowed per request "
+                f"(counting the depot); got {len(locations)}"
+            )
 
         cache_key = self._cache_key(locations, profile, metrics)
         if cache_key in self._cache:
@@ -173,102 +176,5 @@ class MatrixService:
         response = self._parse_response(data, metrics)
         self._cache[cache_key] = response
         return response
-
-    def _init_full_matrices(self, n: int) -> tuple[list, list]:
-        return ([[None] * n for _ in range(n)], [[None] * n for _ in range(n)])
-
-    def _compute_chunk_bounds(self, n: int) -> list[tuple[int, int]]:
-        return [(i, min(i + self.max_locations, n)) for i in range(0, n, self.max_locations)]
-
-    async def _fill_chunk_block(  # noqa: PLR0913, PLR0917
-        self,
-        full_distances: list,
-        full_durations: list,
-        chunk_result: MatrixResponse,
-        i_start: int,
-        i_end: int,
-        j_start: int,
-        j_end: int,
-    ) -> None:
-        chunk_i_size = i_end - i_start
-        chunk_j_size = j_end - j_start
-
-        for r in range(chunk_i_size):
-            for c in range(chunk_j_size):
-                full_distances[i_start + r][j_start + c] = (
-                    chunk_result.distances_km[r][chunk_i_size + c]
-                )
-                full_durations[i_start + r][j_start + c] = (
-                    chunk_result.durations_min[r][chunk_i_size + c]
-                )
-        for r in range(chunk_j_size):
-            for c in range(chunk_i_size):
-                full_distances[j_start + r][i_start + c] = (
-                    chunk_result.distances_km[chunk_i_size + r][c]
-                )
-                full_durations[j_start + r][i_start + c] = (
-                    chunk_result.durations_min[chunk_i_size + r][c]
-                )
-
-    async def _fill_diagonal_block(
-        self,
-        full_distances: list,
-        full_durations: list,
-        chunk_result: MatrixResponse,
-        i_start: int,
-        chunk_size: int,
-    ) -> None:
-        for r in range(chunk_size):
-            for c in range(chunk_size):
-                full_distances[i_start + r][i_start + c] = (
-                    chunk_result.distances_km[r][c]
-                )
-                full_durations[i_start + r][i_start + c] = (
-                    chunk_result.durations_min[r][c]
-                )
-
-    async def get_matrix_chunked(
-        self,
-        locations: list[dict],
-        metrics: list[str] = None,
-        profile: str = "driving-car",
-    ) -> MatrixResponse:
-        if metrics is None:
-            metrics = ["distance", "duration"]
-
-        n = len(locations)
-        if n <= self.max_locations:
-            return await self.get_matrix(locations, metrics, profile)
-
-        full_distances, full_durations = self._init_full_matrices(n)
-        chunk_bounds = self._compute_chunk_bounds(n)
-
-        for i_start, i_end in chunk_bounds:
-            for j_start, j_end in chunk_bounds:
-                chunk_locs = locations[i_start:i_end] + locations[j_start:j_end]
-                chunk_result = await self.get_matrix(chunk_locs, metrics, profile)
-
-                if i_start == j_start:
-                    await self._fill_diagonal_block(
-                        full_distances, full_durations, chunk_result,
-                        i_start, i_end - i_start
-                    )
-                else:
-                    await self._fill_chunk_block(
-                        full_distances, full_durations, chunk_result,
-                        i_start, i_end, j_start, j_end
-                    )
-
-        for i in range(n):
-            full_distances[i][i] = 0.0
-            full_durations[i][i] = 0.0
-
-        return MatrixResponse(
-            distances_km=full_distances,
-            durations_min=full_durations,
-            provider="openrouteservice",
-            cached=False,
-        )
-
 
 matrix_service = MatrixService()

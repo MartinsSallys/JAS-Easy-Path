@@ -32,6 +32,35 @@ from app.services import get_optimizer
 
 router = APIRouter(prefix="/rotas", tags=["Rotas"])
 
+_HTTP_BAD_REQUEST = 400
+_HTTP_UNPROCESSABLE = 422
+_HTTP_INTERNAL_ERROR = 500
+
+_FAILURE_HTTP = {
+    "invalid_input": (_HTTP_BAD_REQUEST, "Dados de entrada inválidos para otimização"),
+    "infeasible": (
+        _HTTP_UNPROCESSABLE,
+        "Não foi possível encontrar solução viável com as restrições atuais",
+    ),
+    "no_solution": (
+        _HTTP_UNPROCESSABLE,
+        "A busca foi encerrada sem encontrar uma solução",
+    ),
+    "timeout": (
+        _HTTP_UNPROCESSABLE,
+        "A busca atingiu o limite de tempo sem encontrar uma solução",
+    ),
+    "invalid_model": (_HTTP_INTERNAL_ERROR, "Modelo de otimização inválido"),
+}
+_DEFAULT_FAILURE = (
+    _HTTP_UNPROCESSABLE,
+    "Não foi possível encontrar solução viável com as restrições atuais",
+)
+
+
+def _hhmm(value: time | None) -> str | None:
+    return value.strftime("%H:%M") if value is not None else None
+
 
 @router.post("", response_model=RotaResponse, status_code=status.HTTP_201_CREATED)
 async def create_rota(
@@ -177,12 +206,8 @@ async def otimizar_rota(
                 longitude=entrega.longitude,
                 address=entrega.endereco,
             ),
-            time_window_start=(
-                entrega.janela_inicio.isoformat() if entrega.janela_inicio else None
-            ),
-            time_window_end=(
-                entrega.janela_fim.isoformat() if entrega.janela_fim else None
-            ),
+            time_window_start=_hhmm(entrega.janela_inicio),
+            time_window_end=_hhmm(entrega.janela_fim),
         )
         for entrega in rota.entregas
     ]
@@ -196,11 +221,9 @@ async def otimizar_rota(
 
     opt_response = get_optimizer().solve(opt_request)
 
-    if opt_response.status == "infeasible" or not opt_response.routes:
-        raise HTTPException(
-            status_code=422,
-            detail="Não foi possível encontrar solução viável com as restrições atuais",
-        )
+    if opt_response.status != "feasible" or not opt_response.routes:
+        code, detail = _FAILURE_HTTP.get(opt_response.status, _DEFAULT_FAILURE)
+        raise HTTPException(status_code=code, detail=opt_response.message or detail)
 
     await session.execute(
         Parada.__table__.delete().where(Parada.rota_id == rota.id)

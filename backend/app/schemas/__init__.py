@@ -291,6 +291,7 @@ class OptimizationResponse(BaseModel):
     unassigned: list[OptimizationDelivery] = []
     status: str
     solve_time_ms: int
+    message: str | None = None
 
 
 # --- Health Schemas ---

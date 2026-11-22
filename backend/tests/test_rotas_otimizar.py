@@ -18,9 +18,11 @@ from app.main import app
 API = "/api/v1"
 HTTP_OK = 200
 HTTP_CREATED = 201
+HTTP_BAD_REQUEST = 400
 HTTP_UNPROCESSABLE = 422
 OPTIMIZE_TIME_LIMIT = 5
 EXPECTED_PARADAS = 4  # depósito + 2 entregas + depósito
+MIN_STOPS_EXPECTED = 3  # depósito + 1 entrega + depósito
 DELIVERY_COUNT = 2
 EXPECTED_DEMAND = 3
 SERVICE_TIME_MIN = 8
@@ -155,6 +157,61 @@ async def test_otimizar_persiste_paradas_com_metricas(
     for entrega in entregas.json():
         assert entrega["parada_ordem"] is not None
         assert entrega["status"] == "ATRIBUIDA"
+
+
+@pytest.mark.asyncio
+async def test_otimizar_janela_valida_normaliza_hhmm(
+    client: AsyncClient,
+) -> None:
+    """Janela 09:00–12:00 é válida: time do banco (HH:MM:SS) vira HH:MM no motor."""
+    rota_id = await _seed_rota(
+        client,
+        [
+            {
+                **_entrega_payload("P001", -23.5505, -46.6333),
+                "janela_inicio": "09:00",
+                "janela_fim": "12:00",
+            },
+        ],
+    )
+
+    response = await client.post(
+        f"{API}/rotas/{rota_id}/otimizar",
+        json={"time_limit_seconds": OPTIMIZE_TIME_LIMIT},
+    )
+
+    assert response.status_code == HTTP_OK
+    body = response.json()
+    assert body["status"] == "OTIMIZADA"
+    paradas = body["paradas"]
+    assert len(paradas) == MIN_STOPS_EXPECTED
+    parada_entrega = next(p for p in paradas if p["entrega_id"] is not None)
+    assert parada_entrega["janela_inicio"].startswith("09:00")
+    assert parada_entrega["janela_fim"].startswith("12:00")
+
+
+@pytest.mark.asyncio
+async def test_otimizar_janela_invertida_retorna_400(
+    client: AsyncClient,
+) -> None:
+    """Janela com início após o fim é entrada malformada: 400, não 422."""
+    rota_id = await _seed_rota(
+        client,
+        [
+            {
+                **_entrega_payload("P001", -23.5505, -46.6333),
+                "janela_inicio": "12:00",
+                "janela_fim": "09:00",
+            },
+        ],
+    )
+
+    response = await client.post(
+        f"{API}/rotas/{rota_id}/otimizar",
+        json={"time_limit_seconds": OPTIMIZE_TIME_LIMIT},
+    )
+
+    assert response.status_code == HTTP_BAD_REQUEST
 
 
 @pytest.mark.asyncio
