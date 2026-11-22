@@ -46,22 +46,33 @@ export default function DeliveriesPage() {
   });
 
   const handleCreate = async (input: NewDelivery) => {
-    await addDelivery(input);
-    setFeedback("Entrega cadastrada com sucesso.");
-    setPanel("none");
+    try {
+      await addDelivery(input);
+      setFeedback("Entrega cadastrada com sucesso.");
+      setPanel("none");
+    } catch {
+      // Erro já registrado no store; mantém o formulário aberto com os dados digitados.
+    }
   };
 
   const handleImport = async (inputs: NewDelivery[]) => {
-    await importDeliveries(inputs);
-    setFeedback(`${inputs.length} entrega(s) importada(s) com sucesso.`);
-    setPanel("none");
+    try {
+      await importDeliveries(inputs);
+      setFeedback(`${inputs.length} entrega(s) importada(s) com sucesso.`);
+      setPanel("none");
+    } catch {
+      // Erro já registrado no store; mantém a pré-visualização aberta.
+    }
   };
 
   const handleRemove = async (d: Delivery) => {
-    if (window.confirm(`Excluir a entrega ${d.orderCode} (${d.customerName})?`)) {
+    if (!window.confirm(`Excluir a entrega ${d.orderCode} (${d.customerName})?`)) return;
+    try {
       await removeDelivery(d.id);
       if (selected?.id === d.id) setSelected(null);
       setFeedback(`Entrega ${d.orderCode} removida.`);
+    } catch {
+      // Erro já registrado no store; não exibe confirmação falsa de remoção.
     }
   };
 

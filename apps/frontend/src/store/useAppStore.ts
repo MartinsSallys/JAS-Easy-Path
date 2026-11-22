@@ -6,6 +6,7 @@ import { routesService } from "@/services/routeService";
 interface AppState {
   deliveries: Delivery[];
   route: RoutePlan | null;
+  initialized: boolean;
   loading: boolean;
   error: string | null;
   /** Relógio da DEMONSTRAÇÃO (só usado no modo mock). */
@@ -26,81 +27,119 @@ interface AppState {
 
 const messageOf = (e: unknown) => (e instanceof Error ? e.message : "Erro inesperado.");
 
-/**
- * O store é só um CACHE para a tela. A fonte dos dados são os services.
- * Padrão de toda ação: chama o service -> recarrega os dados -> a tela atualiza sozinha.
- */
 export const useAppStore = create<AppState>()((set) => {
-  const reload = async () => {
-    const [deliveries, route] = await Promise.all([deliveriesService.list(), routesService.get()]);
-    set({ deliveries, route });
+  const reload = async (errorPrefix?: string) => {
+    const [deliveriesRes, routeRes] = await Promise.allSettled([
+      deliveriesService.list(),
+      routesService.get(),
+    ]);
+
+    const updates: Partial<AppState> = { initialized: true };
+    const errors: string[] = [];
+
+    if (deliveriesRes.status === "fulfilled") {
+      updates.deliveries = deliveriesRes.value;
+    } else {
+      errors.push(messageOf(deliveriesRes.reason));
+    }
+
+    if (routeRes.status === "fulfilled") {
+      updates.route = routeRes.value;
+    } else {
+      errors.push(messageOf(routeRes.reason));
+    }
+
+    if (errors.length > 0) {
+      const detail = errors.join(" ");
+      updates.error = errorPrefix ? `${errorPrefix}: ${detail}` : detail;
+    }
+
+    set(updates);
   };
 
-  /** Liga "carregando", executa a ação e captura erro sem try/catch. */
-  const run = (action: () => Promise<void>) => {
+  const mutateAndReload = async (mutation: () => Promise<void>) => {
     set({ loading: true, error: null });
-    return action()
-      .catch((e: unknown) => set({ error: messageOf(e) }))
-      .finally(() => set({ loading: false }));
+    try {
+      await mutation();
+    } catch (e: unknown) {
+      set({ loading: false, error: messageOf(e) });
+      throw e;
+    }
+
+    await reload("Alteração salva, mas houve falha ao atualizar a lista");
+    set({ loading: false });
   };
 
   return {
     deliveries: [],
     route: null,
+    initialized: false,
     loading: false,
     error: null,
     nowSimulated: "19:45",
 
-    refresh: () => run(reload),
+    refresh: async () => {
+      set({ loading: true, error: null });
+      try {
+        await reload();
+      } finally {
+        set({ loading: false });
+      }
+    },
 
     addDelivery: (input) =>
-      run(async () => {
-        await deliveriesService.create(input);
-        await reload();
+      mutateAndReload(async () => {
+        const created = await deliveriesService.create(input);
+        set((s) => ({ deliveries: [...s.deliveries, created] }));
       }),
 
     importDeliveries: (inputs) =>
-      run(async () => {
-        await deliveriesService.createMany(inputs);
-        await reload();
+      mutateAndReload(async () => {
+        const created = await deliveriesService.createMany(inputs);
+        set((s) => ({ deliveries: [...s.deliveries, ...created] }));
       }),
 
     removeDelivery: (id) =>
-      run(async () => {
+      mutateAndReload(async () => {
         await deliveriesService.remove(id);
-        await reload();
+        set((s) => ({ deliveries: s.deliveries.filter((d) => d.id !== id) }));
       }),
 
     completeDelivery: (id, at) =>
-      run(async () => {
-        await deliveriesService.complete(id, at);
-        await reload();
+      mutateAndReload(async () => {
+        const updated = await deliveriesService.complete(id, at);
+        set((s) => ({
+          deliveries: s.deliveries.map((d) => (d.id === id ? updated : d)),
+        }));
       }),
 
     reportIssue: (id, reason, note, at) =>
-      run(async () => {
-        await deliveriesService.reportIssue(id, reason, note, at);
-        await reload();
+      mutateAndReload(async () => {
+        const updated = await deliveriesService.reportIssue(id, reason, note, at);
+        set((s) => ({
+          deliveries: s.deliveries.map((d) => (d.id === id ? updated : d)),
+        }));
       }),
 
     suggestSequence: () =>
-      run(async () => {
-        await routesService.optimize();
-        await reload();
+      mutateAndReload(async () => {
+        const optimized = await routesService.optimize();
+        set({ route: optimized });
       }),
 
-    shareRoute: () => {
+    shareRoute: async () => {
       set({ error: null });
-      return routesService.share().catch((e: unknown) => {
+      try {
+        return await routesService.share();
+      } catch (e: unknown) {
         set({ error: messageOf(e) });
         return null;
-      });
+      }
     },
 
     resetDemo: () =>
-      run(async () => {
+      mutateAndReload(async () => {
         await deliveriesService.resetDemo();
-        await reload();
       }),
 
     setNowSimulated: (time) => set({ nowSimulated: time }),

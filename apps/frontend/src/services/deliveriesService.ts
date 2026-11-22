@@ -16,15 +16,20 @@ export interface DeliveriesService {
   resetDemo(): Promise<void>;
 }
 
-const post = (path: string, body: unknown) =>
-  http<DeliveryDTO>(path, { method: "POST", body: JSON.stringify(body) });
+const patch = (path: string, body: unknown) =>
+  http<DeliveryDTO>(path, { method: "PATCH", body: JSON.stringify(body) });
 
 const httpDeliveriesService: DeliveriesService = {
   async list() {
     return (await http<DeliveryDTO[]>("/deliveries")).map(toDelivery);
   },
   async create(input) {
-    return toDelivery(await post("/deliveries", toNewDeliveryDTO(input)));
+    return toDelivery(
+      await http<DeliveryDTO>("/deliveries", {
+        method: "POST",
+        body: JSON.stringify(toNewDeliveryDTO(input)),
+      }),
+    );
   },
   async createMany(inputs) {
     const dtos = await http<DeliveryDTO[]>("/deliveries/bulk", {
@@ -37,10 +42,22 @@ const httpDeliveriesService: DeliveriesService = {
     await http<void>(`/deliveries/${id}`, { method: "DELETE" });
   },
   async complete(id, at) {
-    return toDelivery(await post(`/deliveries/${id}/complete`, { at }));
+    return toDelivery(
+      await patch(`/deliveries/${id}`, {
+        status: "completed",
+        completedAt: at,
+      }),
+    );
   },
   async reportIssue(id, reason, note, at) {
-    return toDelivery(await post(`/deliveries/${id}/issue`, { reason, note, at }));
+    return toDelivery(
+      await patch(`/deliveries/${id}`, {
+        status: "issue",
+        issueReason: reason,
+        notes: note,
+        updatedAt: at,
+      }),
+    );
   },
   async resetDemo() {
     // A API real não tem "restaurar demonstração".
