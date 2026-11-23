@@ -340,6 +340,27 @@ def test_infeasible_input_carries_reason(optimizer: RouteEngineAdapter) -> None:
     assert response.routes == []
 
 
+@pytest.mark.parametrize(
+    "delivery_kwargs",
+    [
+        {"time_window_start": "17:00"},
+        {"time_window_end": "12:00"},
+    ],
+)
+def test_partial_time_window_is_invalid_input(
+    optimizer: RouteEngineAdapter, delivery_kwargs: dict
+) -> None:
+    """Janela pela metade não é descartada: o motor a rejeita como invalid_input."""
+    request = _single_delivery_request(**delivery_kwargs)
+
+    response = optimizer.solve(request)
+
+    assert response.status == "invalid_input"
+    assert response.message is not None
+    assert response.routes == []
+    assert len(response.unassigned) == 1
+
+
 _ROUTING_STATUS = routing_enums_pb2.RoutingSearchStatus
 
 

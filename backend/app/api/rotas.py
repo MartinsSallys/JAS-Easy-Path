@@ -57,6 +57,16 @@ _DEFAULT_FAILURE = (
     "Não foi possível encontrar solução viável com as restrições atuais",
 )
 
+STATUS_ELEGIVEIS_OTIMIZACAO = frozenset(
+    {EntregaStatus.PENDENTE, EntregaStatus.ATRIBUIDA}
+)
+"""Somente entregas em planejamento entram na otimização.
+
+Estados operacionais (EM_ROTA, ENTREGUE, FALHA) e CANCELADA são preservados:
+a entrega não vai ao solver nem volta a ATRIBUIDA. Para reotimizar uma entrega
+em estado operacional, retorne-a explicitamente a PENDENTE via PUT /entregas.
+"""
+
 
 def _hhmm(value: time | None) -> str | None:
     return value.strftime("%H:%M") if value is not None else None
@@ -184,6 +194,17 @@ async def otimizar_rota(
             status_code=400, detail="Rota não possui entregas para otimizar"
         )
 
+    entregas_elegiveis = [
+        entrega
+        for entrega in rota.entregas
+        if entrega.status in STATUS_ELEGIVEIS_OTIMIZACAO
+    ]
+    if not entregas_elegiveis:
+        raise HTTPException(
+            status_code=400,
+            detail="Rota não possui entregas elegíveis para otimização",
+        )
+
     if not rota.veiculo:
         raise HTTPException(
             status_code=400, detail="Rota não possui veículo atribuído"
@@ -209,7 +230,7 @@ async def otimizar_rota(
             time_window_start=_hhmm(entrega.janela_inicio),
             time_window_end=_hhmm(entrega.janela_fim),
         )
-        for entrega in rota.entregas
+        for entrega in entregas_elegiveis
     ]
 
     opt_request = OptimizationRequest(
@@ -264,6 +285,12 @@ async def otimizar_rota(
             if entrega:
                 entrega.parada_ordem = stop.sequence
                 entrega.status = EntregaStatus.ATRIBUIDA
+
+    # Entregas fora do novo plano (canceladas, concluídas etc.) mantêm o
+    # status; só o vínculo com a parada removida é limpo.
+    for entrega in rota.entregas:
+        if entrega.status not in STATUS_ELEGIVEIS_OTIMIZACAO:
+            entrega.parada_ordem = None
 
     rota.status = RotaStatus.OTIMIZADA
     rota.distancia_total_km = sum(r.total_distance_km for r in opt_response.routes)

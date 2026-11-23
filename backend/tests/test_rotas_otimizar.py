@@ -18,6 +18,7 @@ from app.main import app
 API = "/api/v1"
 HTTP_OK = 200
 HTTP_CREATED = 201
+HTTP_NO_CONTENT = 204
 HTTP_BAD_REQUEST = 400
 HTTP_UNPROCESSABLE = 422
 OPTIMIZE_TIME_LIMIT = 5
@@ -241,3 +242,120 @@ async def test_otimizar_janela_inviavel_retorna_422(
     rota = await client.get(f"{API}/rotas/{rota_id}")
     assert rota.json()["status"] == "RASCUNHO"
     assert rota.json()["paradas"] == []
+
+
+async def _entregas_da_rota(client: AsyncClient, rota_id: int) -> list[dict]:
+    response = await client.get(
+        f"{API}/entregas", params={"rota_id": rota_id}
+    )
+    assert response.status_code == HTTP_OK
+    return response.json()
+
+
+@pytest.mark.asyncio
+async def test_otimizar_sem_elegiveis_nao_reativa_cancelada(
+    client: AsyncClient,
+) -> None:
+    """Rota cuja única entrega foi cancelada: 400 claro, sem reativá-la."""
+    rota_id = await _seed_rota(
+        client, [_entrega_payload("P001", -23.5505, -46.6333)]
+    )
+    entrega_id = (await _entregas_da_rota(client, rota_id))[0]["id"]
+
+    delete = await client.delete(f"{API}/entregas/{entrega_id}")
+    assert delete.status_code == HTTP_NO_CONTENT
+    cancelled = await client.get(f"{API}/entregas/{entrega_id}")
+    assert cancelled.json()["status"] == "CANCELADA"
+
+    response = await client.post(
+        f"{API}/rotas/{rota_id}/otimizar",
+        json={"time_limit_seconds": OPTIMIZE_TIME_LIMIT},
+    )
+
+    assert response.status_code == HTTP_BAD_REQUEST
+
+    # O cancelamento é preservado e nada foi persistido como otimizado
+    after = await client.get(f"{API}/entregas/{entrega_id}")
+    assert after.json()["status"] == "CANCELADA"
+    rota = await client.get(f"{API}/rotas/{rota_id}")
+    assert rota.json()["status"] == "RASCUNHO"
+    assert rota.json()["paradas"] == []
+
+
+@pytest.mark.asyncio
+async def test_otimizar_exclui_cancelada_e_atende_elegiveis(
+    client: AsyncClient,
+) -> None:
+    """Entrega cancelada não vai ao solver nem volta a ATRIBUIDA."""
+    rota_id = await _seed_rota(
+        client,
+        [
+            _entrega_payload("P001", -23.5505, -46.6333),
+            _entrega_payload("P002", -23.5550, -46.6400),
+        ],
+    )
+    entregas = await _entregas_da_rota(client, rota_id)
+    cancelada_id = entregas[0]["id"]
+    elegivel_id = entregas[1]["id"]
+
+    delete = await client.delete(f"{API}/entregas/{cancelada_id}")
+    assert delete.status_code == HTTP_NO_CONTENT
+
+    response = await client.post(
+        f"{API}/rotas/{rota_id}/otimizar",
+        json={"time_limit_seconds": OPTIMIZE_TIME_LIMIT},
+    )
+
+    assert response.status_code == HTTP_OK
+    parada_entrega_ids = {
+        p["entrega_id"] for p in response.json()["paradas"] if p["entrega_id"]
+    }
+    assert parada_entrega_ids == {elegivel_id}
+
+    depois = {e["id"]: e for e in await _entregas_da_rota(client, rota_id)}
+    assert depois[cancelada_id]["status"] == "CANCELADA"
+    assert depois[cancelada_id]["parada_ordem"] is None
+    assert depois[elegivel_id]["status"] == "ATRIBUIDA"
+    assert depois[elegivel_id]["parada_ordem"] is not None
+
+
+@pytest.mark.asyncio
+async def test_reotimizar_preserva_entrega_concluida(
+    client: AsyncClient,
+) -> None:
+    """Reotimização não reenvia nem reinicia entrega já concluída."""
+    rota_id = await _seed_rota(
+        client,
+        [
+            _entrega_payload("P001", -23.5505, -46.6333),
+            _entrega_payload("P002", -23.5550, -46.6400),
+        ],
+    )
+    first = await client.post(
+        f"{API}/rotas/{rota_id}/otimizar",
+        json={"time_limit_seconds": OPTIMIZE_TIME_LIMIT},
+    )
+    assert first.status_code == HTTP_OK
+
+    entregas = await _entregas_da_rota(client, rota_id)
+    concluida_id = entregas[0]["id"]
+    pendente_id = entregas[1]["id"]
+    update = await client.put(
+        f"{API}/entregas/{concluida_id}", json={"status": "ENTREGUE"}
+    )
+    assert update.status_code == HTTP_OK
+
+    second = await client.post(
+        f"{API}/rotas/{rota_id}/otimizar",
+        json={"time_limit_seconds": OPTIMIZE_TIME_LIMIT},
+    )
+
+    assert second.status_code == HTTP_OK
+    parada_entrega_ids = {
+        p["entrega_id"] for p in second.json()["paradas"] if p["entrega_id"]
+    }
+    assert parada_entrega_ids == {pendente_id}
+
+    depois = {e["id"]: e for e in await _entregas_da_rota(client, rota_id)}
+    assert depois[concluida_id]["status"] == "ENTREGUE"
+    assert depois[pendente_id]["status"] == "ATRIBUIDA"

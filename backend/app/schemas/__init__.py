@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class EntregaStatus(StrEnum):
@@ -103,7 +103,13 @@ class EntregaBase(BaseModel):
 
 
 class EntregaCreate(EntregaBase):
-    pass
+    @model_validator(mode="after")
+    def _janela_completa(self) -> "EntregaCreate":
+        if (self.janela_inicio is None) != (self.janela_fim is None):
+            raise ValueError(
+                "janela_inicio e janela_fim devem ser informados juntos"
+            )
+        return self
 
 
 class EntregaBatchCreate(BaseModel):

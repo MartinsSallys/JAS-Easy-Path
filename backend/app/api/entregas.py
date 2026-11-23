@@ -85,6 +85,12 @@ async def update_entrega(
     for field, value in update_data.items():
         setattr(entrega, field, value)
 
+    if (entrega.janela_inicio is None) != (entrega.janela_fim is None):
+        raise HTTPException(
+            status_code=422,
+            detail="janela_inicio e janela_fim devem ser informados juntos",
+        )
+
     await session.commit()
     await session.refresh(entrega)
     return entrega

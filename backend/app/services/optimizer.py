@@ -153,7 +153,12 @@ class RouteEngineAdapter:
                     "address": delivery.location.address,
                 },
             }
-            if delivery.time_window_start and delivery.time_window_end:
+            # Janela parcial é propagada: o validador do motor a rejeita como
+            # invalid_input em vez de a restrição ser descartada silenciosamente.
+            if (
+                delivery.time_window_start is not None
+                or delivery.time_window_end is not None
+            ):
                 raw["time_window"] = {
                     "start": delivery.time_window_start,
                     "end": delivery.time_window_end,
