@@ -168,7 +168,8 @@ Após alterar restrições de dependências no `pyproject.toml`, atualize o lock
 
 ## Exemplo manual de distâncias e durações
 
-O cenário em `route_engine/examples/manual_distance_scenario.py` fornece um `Problem`
+O cenário em `route_engine/route_engine/examples/manual_distance_scenario.py`
+fornece um `Problem`
 validado, uma matriz de distâncias em metros e uma matriz de durações em minutos. As
 duas usam a ordem `[depósito, *problem.deliveries]`: índice `0` representa o depósito
 e índice `i + 1` representa `problem.deliveries[i]`, sem usar IDs como índices. Ambas

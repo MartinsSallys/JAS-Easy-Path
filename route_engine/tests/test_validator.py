@@ -1,7 +1,6 @@
 import math
 
 import pytest
-
 from route_engine.domain.models import (
     Delivery,
     Depot,
