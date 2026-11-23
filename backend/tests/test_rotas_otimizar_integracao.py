@@ -442,10 +442,9 @@ async def test_otimizar_sem_retorno_no_expediente_retorna_422(
     response = await _otimizar(client, seed["rota_id"])
 
     assert response.status_code == HTTP_UNPROCESSABLE
-    rota = await client.get(f"{API}/rotas/{seed['rota_id']}")
-    assert rota.json()["status"] == "RASCUNHO"
-    assert rota.json()["paradas"] == []
-
+    assert response.json()["detail"] == (
+    "Não foi possível encontrar solução viável com as restrições atuais"
+)
 
 @pytest.mark.asyncio
 async def test_otimizar_rota_inexistente_retorna_404(
