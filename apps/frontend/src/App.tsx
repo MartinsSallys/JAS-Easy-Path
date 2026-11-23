@@ -1,14 +1,33 @@
-export function App() {
+import { useEffect } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { AdminLayout } from "@/components/layout/AdminLayout";
+import DashboardPage from "@/pages/DashboardPage";
+import DeliveriesPage from "@/pages/DeliveriesPage";
+import DriverPage from "@/pages/DriverPage";
+import RoutePage from "@/pages/RoutePage";
+import { useAppStore } from "@/store/useAppStore";
+
+export default function App() {
+  const refresh = useAppStore((s) => s.refresh);
+
+  // Ao abrir o app, busca os dados uma vez.
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 text-center">
-        <h1 className="text-2xl font-bold text-slate-900">JAS Easy Path</h1>
-        <p className="text-sm text-slate-600 mt-1">
-          Excelsior!! - Ambiente configurado com Vite, React, TypeScript e Tailwind CSS v4.
-        </p>
-      </div>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        {/* Telas do lojista: compartilham a sidebar (AdminLayout) */}
+        <Route element={<AdminLayout />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="entregas" element={<DeliveriesPage />} />
+          <Route path="rota" element={<RoutePage />} />
+        </Route>
+        {/* Tela do entregador: layout próprio, sem sidebar */}
+        <Route path="/entregador" element={<DriverPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
-
-export default App;
