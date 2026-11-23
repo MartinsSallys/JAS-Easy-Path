@@ -77,7 +77,7 @@ export default function DriverPage() {
     }
   };
 
-  const isInitialLoading = loading && !initialized;
+  const isInitialLoading = !initialized;
   const hasActiveRoute = !!route && route.routes.length > 0 && !!activeRoute;
 
   return (

@@ -53,7 +53,7 @@ export default function DashboardPage() {
               onChange={(e) => setNowSimulated(e.target.value)}
               className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-slate-800"
             />
-            <Button variant="secondary" onClick={() => void resetDemo()} className="min-h-9 px-3 py-1 text-xs">
+            <Button variant="secondary"onClick={() => {void resetDemo().catch(() => {});}} className="min-h-9 px-3 py-1 text-xs">
               <RotateCcw className="h-3.5 w-3.5" />
               Restaurar demonstração
             </Button>

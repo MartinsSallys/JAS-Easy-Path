@@ -19,7 +19,7 @@ export interface DeliveriesService {
 const patch = (path: string, body: unknown) =>
   http<DeliveryDTO>(path, { method: "PATCH", body: JSON.stringify(body) });
 
-const httpDeliveriesService: DeliveriesService = {
+export const httpDeliveriesService: DeliveriesService = {
   async list() {
     return (await http<DeliveryDTO[]>("/deliveries")).map(toDelivery);
   },
@@ -45,7 +45,7 @@ const httpDeliveriesService: DeliveriesService = {
     return toDelivery(
       await patch(`/deliveries/${id}`, {
         status: "completed",
-        completedAt: at,
+        completed_at: at,
       }),
     );
   },
@@ -53,9 +53,9 @@ const httpDeliveriesService: DeliveriesService = {
     return toDelivery(
       await patch(`/deliveries/${id}`, {
         status: "issue",
-        issueReason: reason,
+        issue_reason: reason,
         notes: note,
-        updatedAt: at,
+        updated_at: at,
       }),
     );
   },

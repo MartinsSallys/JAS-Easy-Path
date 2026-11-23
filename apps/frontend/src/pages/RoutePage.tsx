@@ -35,10 +35,9 @@ export default function RoutePage() {
     [deliveries, activeRoute],
   );
 
-  if (loading && !initialized) {
-    return <p className="text-sm text-slate-500">Carregando plano de rota...</p>;
-  }
-
+if (!initialized) {
+  return <p className="text-sm text-slate-500">Carregando plano de rota...</p>;
+}
   const hasRoutes = !!route && route.routes.length > 0;
   const hasDeliveries = deliveries.length > 0;
   const pendingStops = stops.filter(needsVisit);

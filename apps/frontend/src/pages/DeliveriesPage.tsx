@@ -45,24 +45,16 @@ export default function DeliveriesPage() {
     return matchesFilter && text.includes(search.trim().toLowerCase());
   });
 
-  const handleCreate = async (input: NewDelivery) => {
-    try {
-      await addDelivery(input);
-      setFeedback("Entrega cadastrada com sucesso.");
-      setPanel("none");
-    } catch {
-      // Erro já registrado no store; mantém o formulário aberto com os dados digitados.
-    }
+const handleCreate = async (input: NewDelivery) => {
+    await addDelivery(input);
+    setFeedback("Entrega cadastrada com sucesso.");
+    setPanel("none");
   };
 
   const handleImport = async (inputs: NewDelivery[]) => {
-    try {
-      await importDeliveries(inputs);
-      setFeedback(`${inputs.length} entrega(s) importada(s) com sucesso.`);
-      setPanel("none");
-    } catch {
-      // Erro já registrado no store; mantém a pré-visualização aberta.
-    }
+    await importDeliveries(inputs);
+    setFeedback(`${inputs.length} entrega(s) importada(s) com sucesso.`);
+    setPanel("none");
   };
 
   const handleRemove = async (d: Delivery) => {
