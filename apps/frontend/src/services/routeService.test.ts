@@ -9,12 +9,12 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-describe("httpRoutesService — reotimização e rollback de estado", () => {
+describe("httpRoutesService — criação, reotimização segura e bloqueio com entregas novas", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("otimiza apenas entregas elegíveis e arquiva rota anterior via PUT sem chamar DELETE", async () => {
+  it("cria e otimiza a primeira rota do dia apenas com entregas elegíveis (PENDENTE/ATRIBUIDA)", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -52,7 +52,7 @@ describe("httpRoutesService — reotimização e rollback de estado", () => {
             longitude: -39.07,
             demanda: 1,
             status: "ENTREGUE",
-            rota_id: 50,
+            rota_id: null,
             created_at: "2026-11-24T08:00:00",
             updated_at: "2026-11-24T09:00:00",
           },
@@ -64,7 +64,7 @@ describe("httpRoutesService — reotimização e rollback de estado", () => {
             longitude: -39.08,
             demanda: 1,
             status: "FALHA",
-            rota_id: 50,
+            rota_id: null,
             created_at: "2026-11-24T08:00:00",
             updated_at: "2026-11-24T09:10:00",
           },
@@ -82,22 +82,7 @@ describe("httpRoutesService — reotimização e rollback de estado", () => {
           },
         ]),
       )
-      .mockResolvedValueOnce(
-        jsonResponse([
-          {
-            id: 50,
-            nome: "Rota anterior",
-            data: "2026-11-24",
-            deposito_id: 1,
-            veiculo_id: 1,
-            status: "OTIMIZADA",
-            distancia_total_km: 5,
-            tempo_total_min: 20,
-            created_at: "2026-11-24T08:00:00",
-            updated_at: "2026-11-24T08:05:00",
-          },
-        ]),
-      )
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(
         jsonResponse(
           {
@@ -141,18 +126,6 @@ describe("httpRoutesService — reotimização e rollback de estado", () => {
             },
           ],
         }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          id: 50,
-          nome: "Rota anterior",
-          data: "2026-11-24",
-          deposito_id: 1,
-          veiculo_id: 1,
-          status: "CANCELADA",
-          created_at: "2026-11-24T08:00:00",
-          updated_at: "2026-11-24T10:01:00",
-        }),
       );
 
     const plan = await httpRoutesService.optimize();
@@ -164,14 +137,9 @@ describe("httpRoutesService — reotimização e rollback de estado", () => {
       entrega_ids: number[];
     };
     expect(postRotaBody.entrega_ids).toEqual([12]);
-
-    const putRotaCall = fetchMock.mock.calls[6];
-    expect(String(putRotaCall[0])).toContain("/rotas/50");
-    expect(putRotaCall[1]?.method).toBe("PUT");
-    expect(JSON.parse(String(putRotaCall[1]?.body))).toEqual({ status: "CANCELADA" });
   });
 
-  it("preserva vínculos, status ATRIBUIDA e paradas da rota anterior quando a nova otimização falha com 422", async () => {
+  it("bloqueia substituição de rota ativa quando há novas entregas sem vínculo e preserva a rota existente", async () => {
     const dbEntregas = [
       {
         id: 10,
@@ -237,7 +205,7 @@ describe("httpRoutesService — reotimização e rollback de estado", () => {
       },
     ];
 
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
 
@@ -260,7 +228,7 @@ describe("httpRoutesService — reotimização e rollback de estado", () => {
           {
             id: 1,
             placa: "ABC-1234",
-            capacidade: 1,
+            capacidade: 10,
             tipo: "MOTO",
             ativo: true,
             created_at: "2026-11-24T08:00:00",
@@ -276,75 +244,23 @@ describe("httpRoutesService — reotimização e rollback de estado", () => {
         return jsonResponse(dbRotas);
       }
 
-      if (url.endsWith("/rotas") && method === "POST") {
-        const body = JSON.parse(String(init?.body)) as { entrega_ids: number[] };
-        const nova: BackendRotaWithParadasResponseDTO = {
-          id: 2,
-          nome: "Rota 2",
-          data: "2026-11-24",
-          deposito_id: 1,
-          veiculo_id: 1,
-          status: "RASCUNHO",
-          distancia_total_km: null,
-          tempo_total_min: null,
-          created_at: "2026-11-24T09:05:00",
-          updated_at: "2026-11-24T09:05:00",
-          otimizada_em: null,
-          paradas: [],
-        };
-        dbRotas.push(nova);
-        for (const eid of body.entrega_ids) {
-          const ent = dbEntregas.find((e) => e.id === eid);
-          if (ent) {
-            ent.rota_id = 2;
-            ent.status = "ATRIBUIDA";
-          }
-        }
-        return jsonResponse(nova, 201);
-      }
-
-      if (url.endsWith("/rotas/2/otimizar") && method === "POST") {
-        return jsonResponse(
-          { detail: "Não foi possível encontrar solução viável com as restrições atuais" },
-          422,
-        );
-      }
-
-      if (url.endsWith("/rotas/2") && method === "DELETE") {
-        const idx = dbRotas.findIndex((r) => r.id === 2);
-        if (idx !== -1) dbRotas.splice(idx, 1);
-        for (const ent of dbEntregas) {
-          if (ent.rota_id === 2) {
-            ent.rota_id = null;
-            ent.parada_ordem = null;
-            ent.status = "PENDENTE";
-          }
-        }
-        return new Response(null, { status: 204 });
-      }
-
-      if (url.endsWith("/rotas/1/otimizar") && method === "POST") {
-        const rota1 = dbRotas.find((r) => r.id === 1)!;
-        const ent10 = dbEntregas.find((e) => e.id === 10)!;
-        ent10.rota_id = 1;
-        ent10.parada_ordem = 1;
-        ent10.status = "ATRIBUIDA";
-        rota1.status = "OTIMIZADA";
-        return jsonResponse(rota1);
-      }
-
-      throw new Error(`Chamada inesperada: ${method} ${url}`);
+      throw new Error(`Não deveria mutar estado no backend: ${method} ${url}`);
     });
 
     await expect(httpRoutesService.optimize()).rejects.toThrow(HttpError);
 
+    // Garante que nenhuma requisição POST/PUT/DELETE foi disparada
+    const mutatingCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init?.method ?? "GET") !== "GET",
+    );
+    expect(mutatingCalls).toHaveLength(0);
+
+    // Garante que vínculos, status e paradas da rota 1 permanecem 100% intactos
     const entrega10 = dbEntregas.find((e) => e.id === 10)!;
     expect(entrega10.rota_id).toBe(1);
     expect(entrega10.status).toBe("ATRIBUIDA");
     expect(entrega10.parada_ordem).toBe(1);
-
     expect(dbRotas).toHaveLength(1);
-    expect(dbRotas[0].id).toBe(1);
     expect(dbRotas[0].status).toBe("OTIMIZADA");
     expect(dbRotas[0].paradas).toHaveLength(1);
   });

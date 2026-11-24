@@ -94,18 +94,19 @@ export const httpRoutesService: RoutesService = {
       );
     }
 
-    const rotasAnteriores = rotasHoje.filter((r) => r.status !== "CANCELADA");
-    const rotaAnteriorPrincipal = rotasAnteriores[0] ?? null;
+    const rotaAtiva = rotasHoje.find((r) => r.status !== "CANCELADA") ?? null;
 
-    // Caso 1: Todas as entregas elegíveis já pertencem à rota ativa atual ->
-    // reotimiza in-place sem criar rascunho nem transferir vínculos.
-    // Se falhar (422), o backend aborta antes de alterar paradas/entregas.
-    if (
-      rotaAnteriorPrincipal &&
-      elegiveis.every((e) => e.rota_id === rotaAnteriorPrincipal.id)
-    ) {
+    if (rotaAtiva) {
+      const novasSemVinculo = elegiveis.filter((e) => e.rota_id !== rotaAtiva.id);
+      if (novasSemVinculo.length > 0) {
+        throw new HttpError(
+          422,
+          `Já existe uma rota ativa hoje (${rotaAtiva.nome}) com entregas vinculadas. Para evitar perda de vínculos enquanto o backend não suporta substituição transacional, não é possível incorporar ${novasSemVinculo.length} nova(s) entrega(s) à rota existente.`,
+        );
+      }
+      
       const reotimizada = await http<BackendRotaWithParadasResponseDTO>(
-        `/rotas/${rotaAnteriorPrincipal.id}/otimizar`,
+        `/rotas/${rotaAtiva.id}/otimizar`,
         {
           method: "POST",
           body: JSON.stringify(OPTIMIZE_PAYLOAD),
@@ -114,8 +115,6 @@ export const httpRoutesService: RoutesService = {
       return toRoutePlanFromBackend(reotimizada, deposito, veiculo);
     }
 
-    // Caso 2: Há novas entregas sem rota para incluir ->
-    // cria nova rota, otimiza e, em caso de falha, remove o rascunho e restaura os vínculos da rota anterior.
     const novaRota = await http<BackendRotaResponseDTO>("/rotas", {
       method: "POST",
       body: JSON.stringify({
@@ -138,39 +137,7 @@ export const httpRoutesService: RoutesService = {
       );
     } catch (err) {
       await http<void>(`/rotas/${novaRota.id}`, { method: "DELETE" }).catch(() => {});
-      if (rotaAnteriorPrincipal) {
-        // Restaura rota_id, parada_ordem e status ATRIBUIDA das entregas na rota anterior
-        await http<BackendRotaWithParadasResponseDTO>(
-          `/rotas/${rotaAnteriorPrincipal.id}/otimizar`,
-          {
-            method: "POST",
-            body: JSON.stringify(OPTIMIZE_PAYLOAD),
-          },
-        ).catch(() => {});
-      }
       throw err;
-    }
-
-    // Arquiva rotas anteriores; se falhar, reverte o rascunho novo para não deixar duas rotas ativas
-    try {
-      for (const antiga of rotasAnteriores) {
-        await http<BackendRotaResponseDTO>(`/rotas/${antiga.id}`, {
-          method: "PUT",
-          body: JSON.stringify({ status: "CANCELADA" }),
-        });
-      }
-    } catch (archiveErr) {
-      await http<void>(`/rotas/${novaRota.id}`, { method: "DELETE" }).catch(() => {});
-      if (rotaAnteriorPrincipal) {
-        await http<BackendRotaWithParadasResponseDTO>(
-          `/rotas/${rotaAnteriorPrincipal.id}/otimizar`,
-          {
-            method: "POST",
-            body: JSON.stringify(OPTIMIZE_PAYLOAD),
-          },
-        ).catch(() => {});
-      }
-      throw archiveErr;
     }
 
     return toRoutePlanFromBackend(otimizada, deposito, veiculo);
