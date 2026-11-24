@@ -24,25 +24,12 @@ import type {
   VehicleRouteDTO,
 } from "@/types/dto";
 
-/**
- * Traduz API <-> front (domain.ts).
- * TODA conversão de formato fica aqui: ids, horários, coordenadas, demanda, unidades, rotas.
- */
-
-/** Demanda enviada por entrega no MVP: cada pedido conta como 1 unidade de capacidade do veículo. */
 export const DEFAULT_DEMAND = 1;
-
-/** Expediente padrão do MVP (08:00 às 18:00). */
 export const DEFAULT_WINDOW_START = "08:00";
 export const DEFAULT_WINDOW_END = "18:00";
 
 const MINUTES_PER_DAY = 1440;
 
-// ---------------------------------------------------------------------------
-// Horários
-// ---------------------------------------------------------------------------
-
-/** "19:30" -> 1170. Aceita "24:00" (1440 = fim do dia). Lança erro se o texto for inválido. */
 export function hhmmToMinutes(text: string): number {
   const match = /^(\d{1,2}):(\d{2})$/.exec(text.trim());
   if (!match) throw new Error(`Horário inválido: "${text}". Use HH:mm.`);
@@ -53,7 +40,6 @@ export function hhmmToMinutes(text: string): number {
   return hours * 60 + minutes;
 }
 
-/** 1170 -> "19:30". 1440 -> "24:00". */
 export function minutesToHHmm(totalMinutes: number): string {
   const clamped = Math.min(Math.max(Math.round(totalMinutes), 0), MINUTES_PER_DAY);
   const hours = Math.floor(clamped / 60);
@@ -62,20 +48,27 @@ export function minutesToHHmm(totalMinutes: number): string {
 }
 
 /**
- * "2026-11-19T19:50:00-03:00" -> "19:50" ou "19:50:00" -> "19:50".
- * Lê a hora do próprio texto, sem converter fuso.
+ * Lê hora HH:mm:
+ * - Se vier com offset explícito (ex.: "2026-11-19T19:50:00-03:00"), mantém a hora local do texto.
+ * - Se vier ISO naive do backend (UTC sem Z, ex.: "2026-11-24T16:00:00"), converte de UTC para o fuso local.
  */
 export function wallClockHHmm(value: string): string {
-  const isoMatch = /^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2})/.exec(value);
-  if (isoMatch) return isoMatch[1];
-  const timeMatch = /^(\d{2}:\d{2})(?::\d{2})?$/.exec(value.trim());
-  return timeMatch ? timeMatch[1] : value;
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?[+-]\d{2}:\d{2}$/.test(trimmed)) {
+    return trimmed.slice(11, 16);
+  }
+  const naiveUtcMatch = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(Z)?$/.exec(trimmed);
+  if (naiveUtcMatch) {
+    const isoUtc = naiveUtcMatch[1] ? trimmed : `${trimmed}Z`;
+    const date = new Date(isoUtc);
+    if (!Number.isNaN(date.getTime())) {
+      return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    }
+  }
+  const timeMatch = /^(\d{2}:\d{2})(?::\d{2})?$/.exec(trimmed);
+  return timeMatch ? timeMatch[1] : trimmed;
 }
 
-/**
- * Janela do formulário/CSV (texto) -> janela da API (minutos).
- * Os dois vazios = sem janela própria -> null.
- */
 export function toTimeWindowDTO(windowStart: string, windowEnd: string): TimeWindowDTO | null {
   const start = windowStart.trim();
   const end = windowEnd.trim();
@@ -87,8 +80,15 @@ export function toTimeWindowDTO(windowStart: string, windowEnd: string): TimeWin
 }
 
 // ---------------------------------------------------------------------------
-// Metadados em observacoes (preserva cliente, telefone, prioridade e motivo no backend)
+// Metadados seguros em observacoes (sem quebra por "|" ou "Cliente:")
 // ---------------------------------------------------------------------------
+
+interface ObservacoesMetaPayload {
+  c?: string;
+  p?: string;
+  pr?: Priority;
+  r?: IssueReason | null;
+}
 
 interface ParsedObservacoes {
   customerName: string;
@@ -98,6 +98,7 @@ interface ParsedObservacoes {
   notes: string;
 }
 
+const META_MARKER = "\n[JAS_META]:";
 const VALID_PRIORITIES: Priority[] = ["low", "normal", "high"];
 const VALID_REASONS: IssueReason[] = [
   "customer_absent",
@@ -114,50 +115,62 @@ export function formatBackendObservacoes(meta: {
   issueReason?: IssueReason | null;
   notes?: string;
 }): string | null {
-  const lines: string[] = [];
-  if (meta.customerName?.trim()) lines.push(`Cliente: ${meta.customerName.trim()}`);
-  if (meta.phone?.trim()) lines.push(`Telefone: ${meta.phone.trim()}`);
-  if (meta.priority && meta.priority !== "normal") lines.push(`Prioridade: ${meta.priority}`);
-  if (meta.issueReason) lines.push(`Motivo: ${meta.issueReason}`);
-  if (meta.notes?.trim()) lines.push(meta.notes.trim());
-  return lines.length > 0 ? lines.join(" | ") : null;
+  const payload: ObservacoesMetaPayload = {};
+  if (meta.customerName?.trim()) payload.c = meta.customerName.trim();
+  if (meta.phone?.trim()) payload.p = meta.phone.trim();
+  if (meta.priority && meta.priority !== "normal") payload.pr = meta.priority;
+  if (meta.issueReason) payload.r = meta.issueReason;
+
+  const cleanNotes = (meta.notes ?? "").trim();
+  const hasMeta = Object.keys(payload).length > 0;
+
+  if (!cleanNotes && !hasMeta) return null;
+  if (!hasMeta) return cleanNotes;
+  return `${cleanNotes}${META_MARKER}${JSON.stringify(payload)}`;
 }
 
 export function parseBackendObservacoes(
   raw: string | null,
   fallbackCustomer: string,
 ): ParsedObservacoes {
-  let customerName = fallbackCustomer;
-  let phone = "";
-  let priority: Priority = "normal";
-  let issueReason: IssueReason | null = null;
-  const freeNotes: string[] = [];
+  if (!raw) {
+    return {
+      customerName: fallbackCustomer,
+      phone: "",
+      priority: "normal",
+      issueReason: null,
+      notes: "",
+    };
+  }
 
-  if (raw) {
-    for (const segment of raw.split("|").map((s) => s.trim())) {
-      if (!segment) continue;
-      if (segment.startsWith("Cliente:")) {
-        customerName = segment.slice("Cliente:".length).trim() || fallbackCustomer;
-      } else if (segment.startsWith("Telefone:")) {
-        phone = segment.slice("Telefone:".length).trim();
-      } else if (segment.startsWith("Prioridade:")) {
-        const val = segment.slice("Prioridade:".length).trim() as Priority;
-        if (VALID_PRIORITIES.includes(val)) priority = val;
-      } else if (segment.startsWith("Motivo:")) {
-        const val = segment.slice("Motivo:".length).trim() as IssueReason;
-        if (VALID_REASONS.includes(val)) issueReason = val;
-      } else {
-        freeNotes.push(segment);
-      }
+  const markerIdx = raw.lastIndexOf(META_MARKER);
+  if (markerIdx !== -1) {
+    const notesPart = raw.slice(0, markerIdx).trim();
+    const jsonPart = raw.slice(markerIdx + META_MARKER.length).trim();
+    try {
+      const parsed = JSON.parse(jsonPart) as ObservacoesMetaPayload;
+      const priority =
+        parsed.pr && VALID_PRIORITIES.includes(parsed.pr) ? parsed.pr : "normal";
+      const issueReason =
+        parsed.r && VALID_REASONS.includes(parsed.r) ? parsed.r : null;
+      return {
+        customerName: parsed.c?.trim() || fallbackCustomer,
+        phone: parsed.p?.trim() ?? "",
+        priority,
+        issueReason,
+        notes: notesPart,
+      };
+    } catch {
+      // fallback abaixo se JSON inválido
     }
   }
 
   return {
-    customerName,
-    phone,
-    priority,
-    issueReason,
-    notes: freeNotes.join(" | "),
+    customerName: fallbackCustomer,
+    phone: "",
+    priority: "normal",
+    issueReason: null,
+    notes: raw.trim(),
   };
 }
 
@@ -220,7 +233,7 @@ export function toNewDeliveryDTO(input: NewDelivery): NewDeliveryDTO {
 
 const BACKEND_TO_FRONT_STATUS: Record<BackendEntregaStatus, DeliveryStatus> = {
   PENDENTE: "waiting_departure",
-  ATRIBUIDA: "in_progress",
+  ATRIBUIDA: "waiting_departure",
   EM_ROTA: "in_progress",
   ENTREGUE: "completed",
   FALHA: "issue",
@@ -242,9 +255,7 @@ export function toDeliveryFromBackend(dto: BackendEntregaResponseDTO): Delivery 
   const windowStart = dto.janela_inicio ? wallClockHHmm(dto.janela_inicio) : DEFAULT_WINDOW_START;
   const windowEnd = dto.janela_fim ? wallClockHHmm(dto.janela_fim) : DEFAULT_WINDOW_END;
 
-  const history = [
-    { at: wallClockHHmm(dto.created_at), text: "Pedido cadastrado" },
-  ];
+  const history = [{ at: wallClockHHmm(dto.created_at), text: "Pedido cadastrado" }];
   if (dto.updated_at && dto.updated_at !== dto.created_at) {
     history.push({
       at: wallClockHHmm(dto.updated_at),
@@ -351,7 +362,6 @@ export function toRoutePlanFromBackend(
   deposito: BackendDepositoResponseDTO,
   veiculo: BackendVeiculoResponseDTO | null,
 ): RoutePlan {
-  // Filtra paradas de depósito (entrega_id === null): apenas entregas reais entram em stopIds
   const deliveryStops = [...rota.paradas]
     .filter((p) => p.entrega_id !== null)
     .sort((a, b) => a.ordem - b.ordem);

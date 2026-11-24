@@ -7,6 +7,7 @@ import {
   toNewDeliveryDTO,
   toRoutePlan,
   toRoutePlanFromBackend,
+  wallClockHHmm,
 } from "./mappers";
 import type { RoutePlanDTO } from "@/types/dto";
 
@@ -45,8 +46,9 @@ describe("mappers", () => {
     expect(payload.demanda).toBe(1);
     expect(payload.janela_inicio).toBe(DEFAULT_WINDOW_START);
     expect(payload.janela_fim).toBe(DEFAULT_WINDOW_END);
-    expect(payload.observacoes).toContain("Cliente: Carlos Lima");
-    expect(payload.observacoes).toContain("Prioridade: high");
+    expect(payload.observacoes).toContain("\n[JAS_META]:");
+    expect(payload.observacoes).toContain('"c":"Carlos Lima"');
+    expect(payload.observacoes).toContain('"pr":"high"');
 
     const mappedBack = toDeliveryFromBackend({
       id: 7,
@@ -70,6 +72,43 @@ describe("mappers", () => {
     expect(mappedBack.notes).toBe("Portão verde");
     expect(mappedBack.windowStart).toBe("08:00");
     expect(mappedBack.windowEnd).toBe("18:00");
+  });
+
+  it("preserva nome com pipe, observação iniciando com Cliente: e converte UTC naive para hora local", () => {
+    const payload = toBackendEntregaCreateDTO(
+      {
+        orderCode: "#210",
+        customerName: "Ana | Souza",
+        phone: "(71) 98888-1111",
+        address: "Rua Central, 10",
+        windowStart: "08:00",
+        windowEnd: "18:00",
+        priority: "normal",
+        notes: "Cliente: falso",
+      },
+      { latitude: -13.37, longitude: -39.07 },
+    );
+
+    const mapped = toDeliveryFromBackend({
+      id: 9,
+      pedido_id: "#210",
+      endereco: "Rua Central, 10",
+      latitude: -13.37,
+      longitude: -39.07,
+      demanda: 1,
+      janela_inicio: "08:00:00",
+      janela_fim: "18:00:00",
+      observacoes: payload.observacoes,
+      status: "ENTREGUE",
+      created_at: "2026-11-24T13:00:00",
+      updated_at: "2026-11-24T16:00:00",
+      rota_id: 1,
+      parada_ordem: 1,
+    });
+
+    expect(mapped.customerName).toBe("Ana | Souza");
+    expect(mapped.notes).toBe("Cliente: falso");
+    expect(mapped.completedAt).toBe(wallClockHHmm("2026-11-24T16:00:00"));
   });
 
   it("filtra paradas de depósito (entrega_id null) ao mapear rota do backend FastAPI", () => {

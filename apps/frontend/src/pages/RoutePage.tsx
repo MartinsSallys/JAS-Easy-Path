@@ -83,13 +83,16 @@ if (!initialized) {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant={hasRoutes ? "secondary" : "primary"}
-            onClick={() => void handleOptimize()}
-            disabled={loading || !hasDeliveries}
-          >
+        <Button
+            variant={hasRoutes ? "secondary" : "primary"} 
+            onClick={() => void handleOptimize()} 
+            disabled={loading || !hasDeliveries}>
             <Sparkles className={`h-4 w-4 ${hasRoutes ? "text-blue-600" : "text-white"}`} />
-            {hasRoutes ? "Sugerir sequência" : "Gerar primeira rota"}
+            {loading
+              ? "Otimizando rota..."
+              : hasRoutes
+                ? "Sugerir sequência"
+                : "Gerar primeira rota"}
           </Button>
 
           {hasRoutes ? (

@@ -47,14 +47,24 @@ export const httpDeliveriesService: DeliveriesService = {
     return dtos.filter((d) => d.status !== "CANCELADA").map(toDeliveryFromBackend);
   },
 
-  async create(input) {
+async create(input) {
     const coords = await geocodeAddress(input.address);
     const payload = toBackendEntregaCreateDTO(input, coords, 1);
-    const created = await http<BackendEntregaResponseDTO>("/entregas", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    return toDeliveryFromBackend(created);
+    try {
+      const created = await http<BackendEntregaResponseDTO>("/entregas", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      return toDeliveryFromBackend(created);
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 500) {
+        throw new HttpError(
+          422,
+          `Não foi possível salvar o pedido "${payload.pedido_id}". Verifique se já existe uma entrega cadastrada com este mesmo código.`,
+        );
+      }
+      throw err;
+    }
   },
 
   async createMany(inputs) {

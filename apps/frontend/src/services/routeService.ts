@@ -47,7 +47,7 @@ async function resolveDefaultVeiculo(): Promise<BackendVeiculoResponseDTO> {
   return veiculos[0];
 }
 
-const httpRoutesService: RoutesService = {
+export const httpRoutesService: RoutesService = {
   async get() {
     const today = todayIsoDate();
     const rotas = await http<BackendRotaResponseDTO[]>(`/rotas?data=${today}`);
@@ -77,24 +77,20 @@ const httpRoutesService: RoutesService = {
       http<BackendRotaResponseDTO[]>(`/rotas?data=${today}`),
     ]);
 
-    // Apenas entregas elegíveis (nunca ENTREGUE ou CANCELADA) entram na otimização
+    // Apenas entregas elegíveis (nunca ENTREGUE, FALHA ou CANCELADA) entram na otimização
     const elegiveis = todasEntregas.filter(
       (e) => e.status === "PENDENTE" || e.status === "ATRIBUIDA",
     );
     if (elegiveis.length === 0) {
       throw new HttpError(
         422,
-        "Não há entregas pendentes elegíveis para otimizar. Entregas já concluídas ou canceladas não entram em nova rota.",
+        "Não há entregas pendentes elegíveis para otimizar. Entregas já concluídas, com falha ou canceladas não entram em nova rota.",
       );
     }
 
-    // Remove rascunho/plano anterior do dia para recriar com as entregas elegíveis atualizadas
-    const rotaAnterior = rotasHoje.find((r) => r.status !== "CANCELADA");
-    if (rotaAnterior) {
-      await http<void>(`/rotas/${rotaAnterior.id}`, { method: "DELETE" });
-    }
+    const rotasAnteriores = rotasHoje.filter((r) => r.status !== "CANCELADA");
 
-    // Regra MVP: 1 veículo por rota
+    // 1. Cria a nova rota antes de tocar nas rotas anteriores (operação segura/atômica)
     const novaRota = await http<BackendRotaResponseDTO>("/rotas", {
       method: "POST",
       body: JSON.stringify({
@@ -106,18 +102,32 @@ const httpRoutesService: RoutesService = {
       }),
     });
 
-    // Regra MVP: minimize="distance" e allow_unassigned=false
-    const otimizada = await http<BackendRotaWithParadasResponseDTO>(
-      `/rotas/${novaRota.id}/otimizar`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          minimize: "distance",
-          time_limit_seconds: 30,
-          allow_unassigned: false,
-        }),
-      },
-    );
+    let otimizada: BackendRotaWithParadasResponseDTO;
+    try {
+      otimizada = await http<BackendRotaWithParadasResponseDTO>(
+        `/rotas/${novaRota.id}/otimizar`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            minimize: "distance",
+            time_limit_seconds: 5,
+            allow_unassigned: false,
+          }),
+        },
+      );
+    } catch (err) {
+      // Falhou ao otimizar: remove apenas o rascunho recém-criado e mantém a rota anterior intacta
+      await http<void>(`/rotas/${novaRota.id}`, { method: "DELETE" }).catch(() => {});
+      throw err;
+    }
+
+    // 2. Arquiva rotas anteriores via PUT (sem DELETE, preservando entregas ENTREGUE e FALHA)
+    for (const antiga of rotasAnteriores) {
+      await http<BackendRotaResponseDTO>(`/rotas/${antiga.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ status: "CANCELADA" }),
+      });
+    }
 
     return toRoutePlanFromBackend(otimizada, deposito, veiculo);
   },

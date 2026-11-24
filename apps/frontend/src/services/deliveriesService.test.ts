@@ -11,7 +11,7 @@ const mockBackendEntrega: BackendEntregaResponseDTO = {
   demanda: 1,
   janela_inicio: "08:00:00",
   janela_fim: "18:00:00",
-  observacoes: "Cliente: Ana Paula | Telefone: 71999990000",
+  observacoes: '\n[JAS_META]:{"c":"Ana Paula","p":"71999990000"}',
   status: "PENDENTE",
   created_at: "2026-11-23T08:00:00",
   updated_at: "2026-11-23T08:00:00",
@@ -97,7 +97,7 @@ describe("httpDeliveriesService — contrato real FastAPI (/api/v1/entregas)", (
             ...mockBackendEntrega,
             status: "FALHA",
             observacoes:
-              "Cliente: Ana Paula | Telefone: 71999990000 | Motivo: customer_absent | Portão fechado",
+              'Portão fechado\n[JAS_META]:{"c":"Ana Paula","p":"71999990000","r":"customer_absent"}',
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -116,9 +116,11 @@ describe("httpDeliveriesService — contrato real FastAPI (/api/v1/entregas)", (
 
     const putBody = JSON.parse(String(putInit?.body)) as Record<string, unknown>;
     expect(putBody.status).toBe("FALHA");
-    expect(String(putBody.observacoes)).toContain("Motivo: customer_absent");
+    expect(String(putBody.observacoes)).toContain('"r":"customer_absent"');
+    expect(String(putBody.observacoes)).toContain('"c":"Ana Paula"');
     expect(updated.status).toBe("issue");
     expect(updated.issueReason).toBe("customer_absent");
+    expect(updated.customerName).toBe("Ana Paula");
   });
 
   it("atualiza status para ENTREGUE via PUT /entregas/{id}", async () => {
