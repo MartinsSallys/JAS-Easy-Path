@@ -22,6 +22,8 @@ export interface Delivery {
   lng: number;
   windowStart: string;
   windowEnd: string;
+  /** false = a entrega herdou o expediente da loja; true = janela informada no cadastro. */
+  hasExplicitTimeWindow: boolean;
   priority: Priority;
   status: DeliveryStatus;
   notes: string;

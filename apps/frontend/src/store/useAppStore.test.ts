@@ -14,6 +14,7 @@ const sampleDelivery: Delivery = {
   lng: -39.07,
   windowStart: "18:00",
   windowEnd: "20:00",
+  hasExplicitTimeWindow: true,
   priority: "normal",
   status: "waiting_departure",
   notes: "",
@@ -93,6 +94,20 @@ describe("useAppStore — regressão do fluxo de dados e erros", () => {
     expect(state.error).toBe("Endereço inválido");
     expect(state.deliveries).toHaveLength(0);
     expect(state.loading).toBe(false);
+  });
+
+  it("substitui a entrega na lista ao salvar edição", async () => {
+    const updated: Delivery = { ...sampleDelivery, customerName: "Ana Paula Editada" };
+    const updateSpy = vi.spyOn(deliveriesService, "update").mockResolvedValue(updated);
+    vi.spyOn(deliveriesService, "list").mockResolvedValue([updated]);
+    vi.spyOn(routesService, "get").mockResolvedValue(null);
+    useAppStore.setState({ deliveries: [sampleDelivery], initialized: true });
+
+    await useAppStore.getState().updateDelivery("del-1", sampleInput);
+
+    expect(updateSpy).toHaveBeenCalledWith("del-1", sampleInput);
+    expect(useAppStore.getState().deliveries).toEqual([updated]);
+    expect(useAppStore.getState().error).toBeNull();
   });
 
   it("não falha o cadastro quando create salva mas o reload subsequente falha", async () => {

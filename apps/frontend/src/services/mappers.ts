@@ -100,12 +100,37 @@ export function toDelivery(dto: DeliveryDTO): Delivery {
     lng: dto.location?.longitude ?? 0,
     windowStart: minutesToHHmm(dto.time_window.start),
     windowEnd: minutesToHHmm(dto.time_window.end),
+    hasExplicitTimeWindow: dto.has_explicit_time_window,
     priority: dto.priority,
     status: geocodingFailed && notYetDelivered ? "issue" : dto.status,
     notes,
     issueReason: geocodingFailed && notYetDelivered ? "address_not_found" : dto.issue_reason,
     completedAt: dto.completed_at === null ? null : wallClockHHmm(dto.completed_at),
     history: dto.history.map((entry) => ({ at: wallClockHHmm(entry.at), text: entry.text })),
+  };
+}
+
+/**
+ * Delivery -> valores iniciais do formulário de edição.
+ * Desfaz o que toDelivery anexou: remove a nota de geocodificação e,
+ * se a janela foi herdada do expediente, devolve os campos vazios
+ * para não transformar a janela herdada em explícita ao salvar.
+ */
+export function toDeliveryInput(d: Delivery): NewDelivery {
+  const notes = d.notes
+    .split(" | ")
+    .filter((part) => !part.startsWith("Geocodificação"))
+    .join(" | ");
+
+  return {
+    orderCode: d.orderCode,
+    customerName: d.customerName,
+    phone: d.phone,
+    address: d.address,
+    windowStart: d.hasExplicitTimeWindow ? d.windowStart : "",
+    windowEnd: d.hasExplicitTimeWindow ? d.windowEnd : "",
+    priority: d.priority,
+    notes,
   };
 }
 

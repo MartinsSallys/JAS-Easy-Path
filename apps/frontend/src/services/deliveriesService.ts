@@ -10,6 +10,7 @@ export interface DeliveriesService {
   list(): Promise<Delivery[]>;
   create(input: NewDelivery): Promise<Delivery>;
   createMany(inputs: NewDelivery[]): Promise<Delivery[]>;
+  update(id: string, input: NewDelivery): Promise<Delivery>;
   remove(id: string): Promise<void>;
   complete(id: string, at: string): Promise<Delivery>;
   reportIssue(id: string, reason: IssueReason, note: string, at: string): Promise<Delivery>;
@@ -37,6 +38,11 @@ export const httpDeliveriesService: DeliveriesService = {
       body: JSON.stringify(inputs.map(toNewDeliveryDTO)),
     });
     return dtos.map(toDelivery);
+  },
+  async update(id, input) {
+    return toDelivery(
+      await patch(`/deliveries/${id}`, toNewDeliveryDTO(input)),
+    );
   },
   async remove(id) {
     await http<void>(`/deliveries/${id}`, { method: "DELETE" });

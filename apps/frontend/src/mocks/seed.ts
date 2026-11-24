@@ -28,6 +28,7 @@ export function seedDeliveries(): Delivery[] {
     lng,
     windowStart,
     windowEnd,
+    hasExplicitTimeWindow: true,
     priority,
     status,
     notes,

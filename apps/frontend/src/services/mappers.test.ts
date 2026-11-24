@@ -1,6 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { toNewDeliveryDTO, toRoutePlan } from "./mappers";
+import { toDeliveryInput, toNewDeliveryDTO, toRoutePlan } from "./mappers";
+import type { Delivery } from "@/types/domain";
 import type { RoutePlanDTO } from "@/types/dto";
+
+const baseDelivery: Delivery = {
+  id: "del-1",
+  orderCode: "#1001",
+  customerName: "Ana Paula",
+  phone: "71999990000",
+  address: "Rua A, 10",
+  lat: -13.37,
+  lng: -39.07,
+  windowStart: "18:00",
+  windowEnd: "20:00",
+  hasExplicitTimeWindow: true,
+  priority: "normal",
+  status: "waiting_departure",
+  notes: "Deixar na portaria",
+  issueReason: null,
+  completedAt: null,
+  history: [],
+};
 
 describe("mappers", () => {
   it("mapeia janela vazia para time_window: null e demand: 1", () => {
@@ -17,6 +37,29 @@ describe("mappers", () => {
 
     expect(dto.demand).toBe(1);
     expect(dto.time_window).toBeNull();
+  });
+
+  it("devolve janela vazia ao editar entrega que herdou o expediente", () => {
+    const input = toDeliveryInput({
+      ...baseDelivery,
+      windowStart: "08:00",
+      windowEnd: "22:00",
+      hasExplicitTimeWindow: false,
+    });
+
+    expect(input.windowStart).toBe("");
+    expect(input.windowEnd).toBe("");
+  });
+
+  it("remove a nota de geocodificação anexada pela API ao editar", () => {
+    const input = toDeliveryInput({
+      ...baseDelivery,
+      notes: "Deixar na portaria | Geocodificação: endereço sem coordenadas.",
+    });
+
+    expect(input.notes).toBe("Deixar na portaria");
+    expect(input.windowStart).toBe("18:00");
+    expect(input.windowEnd).toBe("20:00");
   });
 
   it("mapeia plano com múltiplos veículos corretamente", () => {

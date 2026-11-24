@@ -27,6 +27,44 @@ describe("httpDeliveriesService — contrato PATCH /deliveries/{id}", () => {
     vi.restoreAllMocks();
   });
 
+  it("serializa os campos editáveis em snake_case ao atualizar entrega", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(mockDeliveryDto), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await httpDeliveriesService.update("del-1", {
+      orderCode: "#1001",
+      customerName: "Ana Paula",
+      phone: "71999990000",
+      address: "Rua A, 10",
+      windowStart: "18:00",
+      windowEnd: "20:00",
+      priority: "high",
+      notes: "Portão azul",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/deliveries/del-1");
+    expect(init?.method).toBe("PATCH");
+
+    const parsedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(parsedBody).toEqual({
+      order_code: "#1001",
+      customer_name: "Ana Paula",
+      phone: "71999990000",
+      address: "Rua A, 10",
+      demand: 1,
+      time_window: { start: 1080, end: 1200 },
+      priority: "high",
+      notes: "Portão azul",
+    });
+    expect(parsedBody).not.toHaveProperty("customerName");
+  });
+
   it("serializa issue_reason e updated_at em snake_case ao registrar pendência", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify(mockDeliveryDto), {

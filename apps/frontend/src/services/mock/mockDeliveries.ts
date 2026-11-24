@@ -10,6 +10,7 @@ function build(input: NewDelivery, db: MockDb, position: number): Delivery {
     id: crypto.randomUUID(),
     ...input,
     orderCode: input.orderCode || `#${1001 + db.deliveries.length + position}`,
+    hasExplicitTimeWindow: input.windowStart.trim() !== "" || input.windowEnd.trim() !== "",
     ...fakeGeocode(input.address, db.route.origin),
     status: "waiting_departure",
     issueReason: null,
@@ -79,6 +80,22 @@ export const mockDeliveriesService: DeliveriesService = {
       }),
     );
     return created;
+  },
+
+  async update(id, input) {
+    await wait();
+    const origin = loadDb().route.origin;
+    const updated = change(id, (d) => ({
+      ...d,
+      ...input,
+      orderCode: input.orderCode || d.orderCode,
+      hasExplicitTimeWindow:
+        input.windowStart.trim() !== "" || input.windowEnd.trim() !== "",
+      ...(input.address !== d.address ? fakeGeocode(input.address, origin) : {}),
+      history: [...d.history, { at: currentHHmm(), text: "Pedido editado" }],
+    }));
+    saveDb(recalcRoute(loadDb()));
+    return updated;
   },
 
   async remove(id) {

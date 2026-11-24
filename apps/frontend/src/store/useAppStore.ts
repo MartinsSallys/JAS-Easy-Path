@@ -15,6 +15,7 @@ interface AppState {
   refresh: () => Promise<void>;
   addDelivery: (input: NewDelivery) => Promise<void>;
   importDeliveries: (inputs: NewDelivery[]) => Promise<void>;
+  updateDelivery: (id: string, input: NewDelivery) => Promise<void>;
   removeDelivery: (id: string) => Promise<void>;
   completeDelivery: (id: string, at: string) => Promise<void>;
   reportIssue: (id: string, reason: IssueReason, note: string, at: string) => Promise<void>;
@@ -97,6 +98,14 @@ export const useAppStore = create<AppState>()((set) => {
       mutateAndReload(async () => {
         const created = await deliveriesService.createMany(inputs);
         set((s) => ({ deliveries: [...s.deliveries, ...created] }));
+      }),
+
+    updateDelivery: (id, input) =>
+      mutateAndReload(async () => {
+        const updated = await deliveriesService.update(id, input);
+        set((s) => ({
+          deliveries: s.deliveries.map((d) => (d.id === id ? updated : d)),
+        }));
       }),
 
     removeDelivery: (id) =>
