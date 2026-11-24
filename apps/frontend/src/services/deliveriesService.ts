@@ -1,8 +1,17 @@
 import type { Delivery, IssueReason, NewDelivery } from "@/types/domain";
-import type { DeliveryDTO } from "@/types/dto";
+import type {
+  BackendEntregaResponseDTO,
+  BackendEntregaUpdateDTO,
+  BackendGeocodeResponseDTO,
+} from "@/types/dto";
 import { USE_MOCK } from "./config";
-import { http } from "./http";
-import { toDelivery, toNewDeliveryDTO } from "./mappers";
+import { HttpError, http } from "./http";
+import {
+  formatBackendObservacoes,
+  parseBackendObservacoes,
+  toBackendEntregaCreateDTO,
+  toDeliveryFromBackend,
+} from "./mappers";
 import { mockDeliveriesService } from "./mock/mockDeliveries";
 
 /** O "contrato" que o resto do app usa. Mock e API real cumprem o MESMO contrato. */
@@ -16,51 +25,112 @@ export interface DeliveriesService {
   resetDemo(): Promise<void>;
 }
 
-const patch = (path: string, body: unknown) =>
-  http<DeliveryDTO>(path, { method: "PATCH", body: JSON.stringify(body) });
+async function geocodeAddress(address: string): Promise<{ latitude: number; longitude: number }> {
+  const geo = await http<BackendGeocodeResponseDTO>("/geocoding/forward", {
+    method: "POST",
+    body: JSON.stringify({ endereco: address, country_code: "br" }),
+  });
+  const best = geo.results[0];
+  if (!best) {
+    throw new HttpError(
+      422,
+      `Não foi possível localizar coordenadas para o endereço "${address}". Verifique rua, número e cidade.`,
+    );
+  }
+  return { latitude: best.latitude, longitude: best.longitude };
+}
 
 export const httpDeliveriesService: DeliveriesService = {
   async list() {
-    return (await http<DeliveryDTO[]>("/deliveries")).map(toDelivery);
+    const dtos = await http<BackendEntregaResponseDTO[]>("/entregas?limit=500");
+    // Entregas CANCELADA não entram nas listas operacionais nem nas rotas do dia
+    return dtos.filter((d) => d.status !== "CANCELADA").map(toDeliveryFromBackend);
   },
+
   async create(input) {
-    return toDelivery(
-      await http<DeliveryDTO>("/deliveries", {
-        method: "POST",
-        body: JSON.stringify(toNewDeliveryDTO(input)),
-      }),
-    );
-  },
-  async createMany(inputs) {
-    const dtos = await http<DeliveryDTO[]>("/deliveries/bulk", {
+    const coords = await geocodeAddress(input.address);
+    const payload = toBackendEntregaCreateDTO(input, coords, 1);
+    const created = await http<BackendEntregaResponseDTO>("/entregas", {
       method: "POST",
-      body: JSON.stringify(inputs.map(toNewDeliveryDTO)),
+      body: JSON.stringify(payload),
     });
-    return dtos.map(toDelivery);
+    return toDeliveryFromBackend(created);
   },
+
+  async createMany(inputs) {
+    if (inputs.length === 0) return [];
+    const geoList = await http<BackendGeocodeResponseDTO[]>("/geocoding/batch", {
+      method: "POST",
+      body: JSON.stringify({ enderecos: inputs.map((item) => item.address) }),
+    });
+
+    const payloads = inputs.map((input, idx) => {
+      const best = geoList[idx]?.results[0];
+      if (!best) {
+        throw new HttpError(
+          422,
+          `Endereço não encontrado na linha ${idx + 1}: "${input.address}".`,
+        );
+      }
+      return toBackendEntregaCreateDTO(
+        input,
+        { latitude: best.latitude, longitude: best.longitude },
+        idx + 1,
+      );
+    });
+
+    const createdList = await http<BackendEntregaResponseDTO[]>("/entregas/batch", {
+      method: "POST",
+      body: JSON.stringify({ entregas: payloads }),
+    });
+    return createdList.map(toDeliveryFromBackend);
+  },
+
   async remove(id) {
-    await http<void>(`/deliveries/${id}`, { method: "DELETE" });
+    await http<void>(`/entregas/${id}`, { method: "DELETE" });
   },
-  async complete(id, at) {
-    return toDelivery(
-      await patch(`/deliveries/${id}`, {
-        status: "completed",
-        completed_at: at,
+
+  async complete(id, _at) {
+    const current = await http<BackendEntregaResponseDTO>(`/entregas/${id}`);
+    const parsed = parseBackendObservacoes(current.observacoes, `Pedido ${current.pedido_id}`);
+    const body: BackendEntregaUpdateDTO = {
+      status: "ENTREGUE",
+      observacoes: formatBackendObservacoes({
+        customerName: parsed.customerName,
+        phone: parsed.phone,
+        priority: parsed.priority,
+        notes: parsed.notes,
       }),
-    );
+    };
+    const updated = await http<BackendEntregaResponseDTO>(`/entregas/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return toDeliveryFromBackend(updated);
   },
-  async reportIssue(id, reason, note, at) {
-    return toDelivery(
-      await patch(`/deliveries/${id}`, {
-        status: "issue",
-        issue_reason: reason,
-        notes: note,
-        updated_at: at,
+
+  async reportIssue(id, reason, note, _at) {
+    const current = await http<BackendEntregaResponseDTO>(`/entregas/${id}`);
+    const parsed = parseBackendObservacoes(current.observacoes, `Pedido ${current.pedido_id}`);
+    const mergedNotes = [parsed.notes, note.trim()].filter(Boolean).join(" — ");
+    const body: BackendEntregaUpdateDTO = {
+      status: "FALHA",
+      observacoes: formatBackendObservacoes({
+        customerName: parsed.customerName,
+        phone: parsed.phone,
+        priority: parsed.priority,
+        issueReason: reason,
+        notes: mergedNotes,
       }),
-    );
+    };
+    const updated = await http<BackendEntregaResponseDTO>(`/entregas/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return toDeliveryFromBackend(updated);
   },
+
   async resetDemo() {
-    // A API real não tem "restaurar demonstração".
   },
 };
 

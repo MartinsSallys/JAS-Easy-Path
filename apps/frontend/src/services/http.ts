@@ -11,6 +11,33 @@ export class HttpError extends Error {
   }
 }
 
+interface FastApiValidationItem {
+  loc?: (string | number)[];
+  msg?: string;
+}
+
+interface FastApiErrorBody extends Partial<ApiErrorDTO> {
+  detail?: string | FastApiValidationItem[];
+}
+
+function extractErrorMessage(body: FastApiErrorBody, fallback: string): string {
+  if (body.error?.message) {
+    return body.error.message;
+  }
+  if (typeof body.detail === "string" && body.detail.trim() !== "") {
+    return body.detail;
+  }
+  if (Array.isArray(body.detail) && body.detail.length > 0) {
+    return body.detail
+      .map((item) => {
+        const field = item.loc ? item.loc.slice(1).join(".") : "";
+        return field ? `${field}: ${item.msg ?? "valor inválido"}` : (item.msg ?? "valor inválido");
+      })
+      .join(" | ");
+  }
+  return fallback;
+}
+
 /** Único lugar do projeto que chama fetch. Devolve o JSON já tipado como T. */
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
@@ -21,10 +48,8 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let message = `Erro ${response.status} ao chamar ${path}`;
     try {
-      const body = (await response.json()) as Partial<ApiErrorDTO>;
-      if (body.error?.message) {
-        message = body.error.message;
-      }
+      const body = (await response.json()) as FastApiErrorBody;
+      message = extractErrorMessage(body, message);
     } catch {
       // mantém a mensagem padrão se a resposta não vier em JSON
     }

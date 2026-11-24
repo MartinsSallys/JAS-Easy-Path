@@ -1,8 +1,14 @@
 import type { RoutePlan } from "@/types/domain";
-import type { RoutePlanDTO } from "@/types/dto";
+import type {
+  BackendDepositoResponseDTO,
+  BackendEntregaResponseDTO,
+  BackendRotaResponseDTO,
+  BackendRotaWithParadasResponseDTO,
+  BackendVeiculoResponseDTO,
+} from "@/types/dto";
 import { USE_MOCK } from "./config";
 import { HttpError, http } from "./http";
-import { toRoutePlan } from "./mappers";
+import { toRoutePlanFromBackend } from "./mappers";
 import { mockRoutesService } from "./mock/mockRoutes";
 
 export interface RoutesService {
@@ -11,23 +17,118 @@ export interface RoutesService {
   share(): Promise<string>;
 }
 
+function todayIsoDate(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+async function resolveDefaultDeposito(): Promise<BackendDepositoResponseDTO> {
+  const depositos = await http<BackendDepositoResponseDTO[]>("/depositos?ativo=true");
+  if (depositos.length === 0) {
+    throw new HttpError(
+      422,
+      "Nenhum depósito ativo cadastrado no sistema. Cadastre um ponto de saída antes de otimizar a rota.",
+    );
+  }
+  return depositos[0];
+}
+
+async function resolveDefaultVeiculo(): Promise<BackendVeiculoResponseDTO> {
+  const veiculos = await http<BackendVeiculoResponseDTO[]>("/veiculos?ativo=true");
+  if (veiculos.length === 0) {
+    throw new HttpError(
+      422,
+      "Nenhum veículo ativo cadastrado no sistema. Cadastre um veículo antes de otimizar a rota.",
+    );
+  }
+  return veiculos[0];
+}
+
 const httpRoutesService: RoutesService = {
   async get() {
-    try {
-      return toRoutePlan(await http<RoutePlanDTO>("/routes/today"));
-    } catch (e) {
-      if (e instanceof HttpError && e.status === 404) {
-        return null;
-      }
-      throw e;
+    const today = todayIsoDate();
+    const rotas = await http<BackendRotaResponseDTO[]>(`/rotas?data=${today}`);
+    const activeRota = rotas.find((r) => r.status !== "CANCELADA");
+    if (!activeRota) {
+      return null;
     }
+
+    const [rotaDetalhe, deposito, veiculos] = await Promise.all([
+      http<BackendRotaWithParadasResponseDTO>(`/rotas/${activeRota.id}`),
+      http<BackendDepositoResponseDTO>(`/depositos/${activeRota.deposito_id}`),
+      http<BackendVeiculoResponseDTO[]>("/veiculos?ativo=true"),
+    ]);
+
+    const veiculo =
+      veiculos.find((v) => v.id === rotaDetalhe.veiculo_id) ?? veiculos[0] ?? null;
+
+    return toRoutePlanFromBackend(rotaDetalhe, deposito, veiculo);
   },
+
   async optimize() {
-    return toRoutePlan(await http<RoutePlanDTO>("/routes/today/optimize", { method: "POST" }));
+    const today = todayIsoDate();
+    const [deposito, veiculo, todasEntregas, rotasHoje] = await Promise.all([
+      resolveDefaultDeposito(),
+      resolveDefaultVeiculo(),
+      http<BackendEntregaResponseDTO[]>("/entregas?limit=500"),
+      http<BackendRotaResponseDTO[]>(`/rotas?data=${today}`),
+    ]);
+
+    // Apenas entregas elegíveis (nunca ENTREGUE ou CANCELADA) entram na otimização
+    const elegiveis = todasEntregas.filter(
+      (e) => e.status === "PENDENTE" || e.status === "ATRIBUIDA",
+    );
+    if (elegiveis.length === 0) {
+      throw new HttpError(
+        422,
+        "Não há entregas pendentes elegíveis para otimizar. Entregas já concluídas ou canceladas não entram em nova rota.",
+      );
+    }
+
+    // Remove rascunho/plano anterior do dia para recriar com as entregas elegíveis atualizadas
+    const rotaAnterior = rotasHoje.find((r) => r.status !== "CANCELADA");
+    if (rotaAnterior) {
+      await http<void>(`/rotas/${rotaAnterior.id}`, { method: "DELETE" });
+    }
+
+    // Regra MVP: 1 veículo por rota
+    const novaRota = await http<BackendRotaResponseDTO>("/rotas", {
+      method: "POST",
+      body: JSON.stringify({
+        nome: `Rota ${today}`,
+        data: today,
+        deposito_id: deposito.id,
+        veiculo_id: veiculo.id,
+        entrega_ids: elegiveis.map((e) => e.id),
+      }),
+    });
+
+    // Regra MVP: minimize="distance" e allow_unassigned=false
+    const otimizada = await http<BackendRotaWithParadasResponseDTO>(
+      `/rotas/${novaRota.id}/otimizar`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          minimize: "distance",
+          time_limit_seconds: 30,
+          allow_unassigned: false,
+        }),
+      },
+    );
+
+    return toRoutePlanFromBackend(otimizada, deposito, veiculo);
   },
+
   async share() {
-    const result = await http<{ url: string }>("/routes/today/share", { method: "POST" });
-    return result.url;
+    const plan = await httpRoutesService.get();
+    if (!plan) {
+      throw new HttpError(404, "Nenhuma rota ativa encontrada para compartilhar.");
+    }
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:5173";
+    return `${baseUrl}/entregador?rota=${plan.id}`;
   },
 };
 

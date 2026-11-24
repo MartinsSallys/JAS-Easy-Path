@@ -1,5 +1,21 @@
-import type { Delivery, NewDelivery, Place, RoutePlan, VehicleRoute } from "@/types/domain";
 import type {
+  Delivery,
+  DeliveryStatus,
+  IssueReason,
+  NewDelivery,
+  Place,
+  Priority,
+  RoutePlan,
+  VehicleRoute,
+} from "@/types/domain";
+import type {
+  BackendDepositoResponseDTO,
+  BackendEntregaCreateDTO,
+  BackendEntregaResponseDTO,
+  BackendEntregaStatus,
+  BackendRotaStatus,
+  BackendRotaWithParadasResponseDTO,
+  BackendVeiculoResponseDTO,
   DeliveryDTO,
   NewDeliveryDTO,
   PlaceDTO,
@@ -9,12 +25,16 @@ import type {
 } from "@/types/dto";
 
 /**
- * Traduz API -> front (domain.ts) e o caminho inverso.
+ * Traduz API <-> front (domain.ts).
  * TODA conversão de formato fica aqui: ids, horários, coordenadas, demanda, unidades, rotas.
  */
 
 /** Demanda enviada por entrega no MVP: cada pedido conta como 1 unidade de capacidade do veículo. */
 export const DEFAULT_DEMAND = 1;
+
+/** Expediente padrão do MVP (08:00 às 18:00). */
+export const DEFAULT_WINDOW_START = "08:00";
+export const DEFAULT_WINDOW_END = "18:00";
 
 const MINUTES_PER_DAY = 1440;
 
@@ -42,18 +62,19 @@ export function minutesToHHmm(totalMinutes: number): string {
 }
 
 /**
- * "2026-11-19T19:50:00-03:00" -> "19:50".
- * Lê a hora do próprio texto, sem converter fuso: o front mostra a hora de parede enviada pela API.
- * Se o texto não for ISO (ex.: já "19:50"), devolve como veio.
+ * "2026-11-19T19:50:00-03:00" -> "19:50" ou "19:50:00" -> "19:50".
+ * Lê a hora do próprio texto, sem converter fuso.
  */
 export function wallClockHHmm(value: string): string {
-  const match = /^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2})/.exec(value);
-  return match ? match[1] : value;
+  const isoMatch = /^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2})/.exec(value);
+  if (isoMatch) return isoMatch[1];
+  const timeMatch = /^(\d{2}:\d{2})(?::\d{2})?$/.exec(value.trim());
+  return timeMatch ? timeMatch[1] : value;
 }
 
 /**
  * Janela do formulário/CSV (texto) -> janela da API (minutos).
- * Os dois vazios = sem janela própria (a API usa o expediente) -> null.
+ * Os dois vazios = sem janela própria -> null.
  */
 export function toTimeWindowDTO(windowStart: string, windowEnd: string): TimeWindowDTO | null {
   const start = windowStart.trim();
@@ -66,7 +87,82 @@ export function toTimeWindowDTO(windowStart: string, windowEnd: string): TimeWin
 }
 
 // ---------------------------------------------------------------------------
-// Entregas
+// Metadados em observacoes (preserva cliente, telefone, prioridade e motivo no backend)
+// ---------------------------------------------------------------------------
+
+interface ParsedObservacoes {
+  customerName: string;
+  phone: string;
+  priority: Priority;
+  issueReason: IssueReason | null;
+  notes: string;
+}
+
+const VALID_PRIORITIES: Priority[] = ["low", "normal", "high"];
+const VALID_REASONS: IssueReason[] = [
+  "customer_absent",
+  "address_not_found",
+  "customer_refused",
+  "operational",
+  "other",
+];
+
+export function formatBackendObservacoes(meta: {
+  customerName?: string;
+  phone?: string;
+  priority?: Priority;
+  issueReason?: IssueReason | null;
+  notes?: string;
+}): string | null {
+  const lines: string[] = [];
+  if (meta.customerName?.trim()) lines.push(`Cliente: ${meta.customerName.trim()}`);
+  if (meta.phone?.trim()) lines.push(`Telefone: ${meta.phone.trim()}`);
+  if (meta.priority && meta.priority !== "normal") lines.push(`Prioridade: ${meta.priority}`);
+  if (meta.issueReason) lines.push(`Motivo: ${meta.issueReason}`);
+  if (meta.notes?.trim()) lines.push(meta.notes.trim());
+  return lines.length > 0 ? lines.join(" | ") : null;
+}
+
+export function parseBackendObservacoes(
+  raw: string | null,
+  fallbackCustomer: string,
+): ParsedObservacoes {
+  let customerName = fallbackCustomer;
+  let phone = "";
+  let priority: Priority = "normal";
+  let issueReason: IssueReason | null = null;
+  const freeNotes: string[] = [];
+
+  if (raw) {
+    for (const segment of raw.split("|").map((s) => s.trim())) {
+      if (!segment) continue;
+      if (segment.startsWith("Cliente:")) {
+        customerName = segment.slice("Cliente:".length).trim() || fallbackCustomer;
+      } else if (segment.startsWith("Telefone:")) {
+        phone = segment.slice("Telefone:".length).trim();
+      } else if (segment.startsWith("Prioridade:")) {
+        const val = segment.slice("Prioridade:".length).trim() as Priority;
+        if (VALID_PRIORITIES.includes(val)) priority = val;
+      } else if (segment.startsWith("Motivo:")) {
+        const val = segment.slice("Motivo:".length).trim() as IssueReason;
+        if (VALID_REASONS.includes(val)) issueReason = val;
+      } else {
+        freeNotes.push(segment);
+      }
+    }
+  }
+
+  return {
+    customerName,
+    phone,
+    priority,
+    issueReason,
+    notes: freeNotes.join(" | "),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Entregas (Contrato legado/mock + Backend FastAPI real)
 // ---------------------------------------------------------------------------
 
 function toPlace(dto: PlaceDTO): Place {
@@ -122,8 +218,92 @@ export function toNewDeliveryDTO(input: NewDelivery): NewDeliveryDTO {
   };
 }
 
+const BACKEND_TO_FRONT_STATUS: Record<BackendEntregaStatus, DeliveryStatus> = {
+  PENDENTE: "waiting_departure",
+  ATRIBUIDA: "in_progress",
+  EM_ROTA: "in_progress",
+  ENTREGUE: "completed",
+  FALHA: "issue",
+  CANCELADA: "issue",
+};
+
+const BACKEND_STATUS_LABEL: Record<BackendEntregaStatus, string> = {
+  PENDENTE: "Aguardando saída",
+  ATRIBUIDA: "Atribuída à rota",
+  EM_ROTA: "Em rota",
+  ENTREGUE: "Entrega concluída",
+  FALHA: "Pendência registrada",
+  CANCELADA: "Entrega cancelada",
+};
+
+export function toDeliveryFromBackend(dto: BackendEntregaResponseDTO): Delivery {
+  const parsed = parseBackendObservacoes(dto.observacoes, `Pedido ${dto.pedido_id}`);
+  const status = BACKEND_TO_FRONT_STATUS[dto.status];
+  const windowStart = dto.janela_inicio ? wallClockHHmm(dto.janela_inicio) : DEFAULT_WINDOW_START;
+  const windowEnd = dto.janela_fim ? wallClockHHmm(dto.janela_fim) : DEFAULT_WINDOW_END;
+
+  const history = [
+    { at: wallClockHHmm(dto.created_at), text: "Pedido cadastrado" },
+  ];
+  if (dto.updated_at && dto.updated_at !== dto.created_at) {
+    history.push({
+      at: wallClockHHmm(dto.updated_at),
+      text: BACKEND_STATUS_LABEL[dto.status],
+    });
+  }
+
+  return {
+    id: String(dto.id),
+    orderCode: dto.pedido_id,
+    customerName: parsed.customerName,
+    phone: parsed.phone,
+    address: dto.endereco,
+    lat: dto.latitude,
+    lng: dto.longitude,
+    windowStart,
+    windowEnd,
+    priority: parsed.priority,
+    status,
+    notes: parsed.notes,
+    issueReason: status === "issue" ? (parsed.issueReason ?? "other") : null,
+    completedAt: status === "completed" ? wallClockHHmm(dto.updated_at) : null,
+    history,
+  };
+}
+
+export function toBackendEntregaCreateDTO(
+  input: NewDelivery,
+  coords: { latitude: number; longitude: number },
+  fallbackIndex = 1,
+): BackendEntregaCreateDTO {
+  const startRaw = input.windowStart.trim();
+  const endRaw = input.windowEnd.trim();
+  if ((startRaw === "") !== (endRaw === "")) {
+    throw new Error("Informe o início e o fim da janela, ou deixe os dois em branco.");
+  }
+
+  const orderCode =
+    input.orderCode.trim() || `#${Date.now().toString().slice(-4)}-${fallbackIndex}`;
+
+  return {
+    pedido_id: orderCode,
+    endereco: input.address.trim(),
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+    demanda: DEFAULT_DEMAND,
+    janela_inicio: startRaw === "" ? DEFAULT_WINDOW_START : startRaw,
+    janela_fim: endRaw === "" ? DEFAULT_WINDOW_END : endRaw,
+    observacoes: formatBackendObservacoes({
+      customerName: input.customerName,
+      phone: input.phone,
+      priority: input.priority,
+      notes: input.notes,
+    }),
+  };
+}
+
 // ---------------------------------------------------------------------------
-// Rota (suporte a múltiplos veículos)
+// Rota (Contrato legado/mock + Backend FastAPI real)
 // ---------------------------------------------------------------------------
 
 function toVehicleRoute(dto: VehicleRouteDTO): VehicleRoute {
@@ -155,5 +335,59 @@ export function toRoutePlan(dto: RoutePlanDTO): RoutePlan {
     totalDurationMin,
     status: dto.status,
     isSimulation: dto.matrix_source === "manual",
+  };
+}
+
+const BACKEND_ROTA_STATUS: Record<BackendRotaStatus, RoutePlan["status"]> = {
+  RASCUNHO: "planned",
+  OTIMIZADA: "planned",
+  EM_ANDAMENTO: "running",
+  CONCLUIDA: "finished",
+  CANCELADA: "finished",
+};
+
+export function toRoutePlanFromBackend(
+  rota: BackendRotaWithParadasResponseDTO,
+  deposito: BackendDepositoResponseDTO,
+  veiculo: BackendVeiculoResponseDTO | null,
+): RoutePlan {
+  // Filtra paradas de depósito (entrega_id === null): apenas entregas reais entram em stopIds
+  const deliveryStops = [...rota.paradas]
+    .filter((p) => p.entrega_id !== null)
+    .sort((a, b) => a.ordem - b.ordem);
+
+  const stopIds = deliveryStops.map((p) => String(p.entrega_id));
+  const load = deliveryStops.reduce((sum, p) => sum + (p.demanda || DEFAULT_DEMAND), 0);
+  const serviceMin = deliveryStops.reduce((sum, p) => sum + (p.tempo_servico_min || 8), 0);
+  const distanceKm = Math.round((rota.distancia_total_km ?? 0) * 10) / 10;
+  const durationMin = rota.tempo_total_min ?? serviceMin;
+  const travelMin = Math.max(durationMin - serviceMin, 0);
+
+  const vehicleRoute: VehicleRoute = {
+    vehicleId: veiculo ? String(veiculo.id) : String(rota.veiculo_id ?? 1),
+    vehicleName: veiculo ? `${veiculo.tipo} (${veiculo.placa})` : "Veículo padrão",
+    capacity: veiculo ? veiculo.capacidade : Math.max(load, 10),
+    load,
+    stopIds,
+    distanceKm,
+    durationMin,
+    travelMin,
+    waitMin: 0,
+    serviceMin,
+  };
+
+  return {
+    id: String(rota.id),
+    origin: {
+      name: deposito.nome,
+      address: deposito.endereco,
+      lat: deposito.latitude,
+      lng: deposito.longitude,
+    },
+    routes: stopIds.length > 0 || rota.status === "OTIMIZADA" ? [vehicleRoute] : [],
+    totalDistanceKm: distanceKm,
+    totalDurationMin: durationMin,
+    status: BACKEND_ROTA_STATUS[rota.status],
+    isSimulation: false,
   };
 }

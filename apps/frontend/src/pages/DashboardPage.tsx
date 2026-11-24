@@ -16,6 +16,7 @@ export default function DashboardPage() {
   const now = useNow();
 
   const kpis = computeKpis(deliveries, now);
+  const recordedTotal = kpis.completed + kpis.issues;
 
   const chartData = [
     { name: "Aguardando", value: kpis.waiting, color: "#94a3b8" },
@@ -53,7 +54,13 @@ export default function DashboardPage() {
               onChange={(e) => setNowSimulated(e.target.value)}
               className="rounded-lg border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-slate-800"
             />
-            <Button variant="secondary"onClick={() => {void resetDemo().catch(() => {});}} className="min-h-9 px-3 py-1 text-xs">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                void resetDemo().catch(() => {});
+              }}
+              className="min-h-9 px-3 py-1 text-xs"
+            >
               <RotateCcw className="h-3.5 w-3.5" />
               Restaurar demonstração
             </Button>
@@ -92,27 +99,33 @@ export default function DashboardPage() {
           </div>
 
           {route ? (
-            <div className="grid grid-cols-3 gap-3 border-t border-slate-100 pt-4 text-sm">
+            <div className="grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 text-sm sm:grid-cols-4">
               <div>
                 <p className="text-xs text-slate-500">Veículos ativos</p>
                 <p className="font-semibold text-slate-900">{route.routes.length}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Distância total</p>
+                <p className="text-xs text-slate-500">Distância estimada</p>
                 <p className="font-semibold text-slate-900">{route.totalDistanceKm} km</p>
               </div>
               <div>
-                <p className="text-xs text-slate-500">Tempo estimado</p>
+                <p className="text-xs text-slate-500">Duração estimada</p>
                 <p className="font-semibold text-slate-900">{route.totalDurationMin} min</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Baixas registradas</p>
+                <p className="font-semibold text-slate-900">
+                  {recordedTotal}/{kpis.total}
+                </p>
               </div>
             </div>
           ) : null}
 
-          {USE_MOCK ? (
-            <p className="text-xs text-slate-400">
-              * Distância e tempo calculados por estimativa demonstrativa (linha reta).
-            </p>
-          ) : null}
+          <p className="text-xs text-slate-400">
+            {USE_MOCK
+              ? "Distância e duração são estimativas calculadas em linha reta (modo demonstração); baixas refletem o status registrado."
+              : "Distância e duração são estimativas calculadas pelo motor de otimização; baixas refletem os registros gravados pelo entregador."}
+          </p>
         </Card>
 
         <Card className="space-y-3">
