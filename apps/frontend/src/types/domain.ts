@@ -22,8 +22,12 @@ export interface Delivery {
   lng: number;
   windowStart: string;
   windowEnd: string;
-  /** false = a entrega herdou o expediente da loja; true = janela informada no cadastro. */
-  hasExplicitTimeWindow: boolean;
+  /**
+   * false = a entrega herdou o expediente da loja; true = janela informada no cadastro.
+   * Opcional: o backend real grava janela vazia como o expediente, sem flag para
+   * distinguir — a integração pode não conseguir preencher este campo.
+   */
+  hasExplicitTimeWindow?: boolean;
   priority: Priority;
   status: DeliveryStatus;
   notes: string;

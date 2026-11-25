@@ -20,6 +20,11 @@ export interface DeliveriesService {
 const patch = (path: string, body: unknown) =>
   http<DeliveryDTO>(path, { method: "PATCH", body: JSON.stringify(body) });
 
+// Edição do cadastro substitui o recurso inteiro: PUT (api.md seção 3.4).
+// No backend real o equivalente é PUT /api/v1/entregas/{id}.
+const put = (path: string, body: unknown) =>
+  http<DeliveryDTO>(path, { method: "PUT", body: JSON.stringify(body) });
+
 export const httpDeliveriesService: DeliveriesService = {
   async list() {
     return (await http<DeliveryDTO[]>("/deliveries")).map(toDelivery);
@@ -41,7 +46,7 @@ export const httpDeliveriesService: DeliveriesService = {
   },
   async update(id, input) {
     return toDelivery(
-      await patch(`/deliveries/${id}`, toNewDeliveryDTO(input)),
+      await put(`/deliveries/${id}`, toNewDeliveryDTO(input)),
     );
   },
   async remove(id) {

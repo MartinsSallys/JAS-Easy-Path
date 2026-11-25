@@ -1,4 +1,5 @@
 import type { Delivery, NewDelivery, RoutePlan } from "@/types/domain";
+import { isDeliveryEditable } from "@/utils/delivery";
 import { issueLabel } from "@/utils/format";
 import { currentHHmm } from "@/utils/time";
 import type { DeliveriesService } from "../deliveriesService";
@@ -85,15 +86,26 @@ export const mockDeliveriesService: DeliveriesService = {
   async update(id, input) {
     await wait();
     const origin = loadDb().route.origin;
-    const updated = change(id, (d) => ({
-      ...d,
-      ...input,
-      orderCode: input.orderCode || d.orderCode,
-      hasExplicitTimeWindow:
-        input.windowStart.trim() !== "" || input.windowEnd.trim() !== "",
-      ...(input.address !== d.address ? fakeGeocode(input.address, origin) : {}),
-      history: [...d.history, { at: currentHHmm(), text: "Pedido editado" }],
-    }));
+    const updated = change(id, (d) => {
+      if (!isDeliveryEditable(d)) {
+        throw new Error(
+          "Só é possível editar entregas aguardando — a rota já otimizada não é recalculada.",
+        );
+      }
+      const fixingAddressIssue =
+        d.status === "issue" && d.issueReason === "address_not_found";
+      return {
+        ...d,
+        ...input,
+        orderCode: input.orderCode || d.orderCode,
+        hasExplicitTimeWindow:
+          input.windowStart.trim() !== "" || input.windowEnd.trim() !== "",
+        ...(input.address !== d.address ? fakeGeocode(input.address, origin) : {}),
+        status: fixingAddressIssue ? "waiting_departure" : d.status,
+        issueReason: fixingAddressIssue ? null : d.issueReason,
+        history: [...d.history, { at: currentHHmm(), text: "Pedido editado" }],
+      };
+    });
     saveDb(recalcRoute(loadDb()));
     return updated;
   },

@@ -22,7 +22,7 @@ const mockDeliveryDto: DeliveryDTO = {
   history: [],
 };
 
-describe("httpDeliveriesService — contrato PATCH /deliveries/{id}", () => {
+describe("httpDeliveriesService — contrato de escrita em /deliveries/{id}", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -49,7 +49,7 @@ describe("httpDeliveriesService — contrato PATCH /deliveries/{id}", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toContain("/deliveries/del-1");
-    expect(init?.method).toBe("PATCH");
+    expect(init?.method).toBe("PUT");
 
     const parsedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
     expect(parsedBody).toEqual({

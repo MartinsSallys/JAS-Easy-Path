@@ -151,21 +151,35 @@ Atualiza o estado operacional da entrega (`waiting_departure`, `in_progress`, `c
 
 ---
 
-### 3.4. Remover entrega
+### 3.4. Editar cadastro da entrega
+`PUT /deliveries/{id}`
+
+Substitui os dados cadastrais da entrega. Diferente do `PATCH` (3.3), que muda apenas o estado operacional, aqui o corpo é o `NewDeliveryDTO` completo (mesmo formato do cadastro, 3.2). O backend refaz a geocodificação quando `address` muda e `time_window: null` volta a herdar o expediente do dia.
+
+Edição permitida apenas enquanto a entrega está `waiting_departure`: depois que a rota é otimizada, alterar o cadastro não recalcula a sequência já atribuída aos veículos.
+
+> **Mapeamento para o backend real:** `PUT /api/v1/entregas/{id}` (`EntregaUpdate`).
+
+**Resposta `200 OK`:** Retorna o `DeliveryDTO` atualizado, com `"Pedido editado"` em `history`.
+**Resposta `422 Unprocessable Entity`:** Retorna `ApiErrorDTO` com `code: "validation_error"` (mesmas regras do cadastro).
+
+---
+
+### 3.5. Remover entrega
 `DELETE /deliveries/{id}`
 
 **Resposta `204 No Content`:** Entrega removida com sucesso (corpo vazio).
 
 ---
 
-### 3.5. Consultar plano de rota atual do dia
+### 3.6. Consultar plano de rota atual do dia
 `GET /routes/today`
 
 Retorna o plano de rota ativo do dia (`RoutePlanDTO`) ou `404 Not Found` caso nenhuma otimização tenha sido executada ainda.
 
 ---
 
-### 3.6. Otimizar rotas do dia
+### 3.7. Otimizar rotas do dia
 `POST /routes/today/optimize`
 
 Executa o motor OR-Tools considerando todos os veículos disponíveis, janelas de entrega, tempo de parada de 8 minutos e capacidade por contagem de pedidos.

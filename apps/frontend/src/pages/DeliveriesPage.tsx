@@ -4,6 +4,7 @@ import type { Delivery, DeliveryStatus, NewDelivery } from "@/types/domain";
 import { useNow } from "@/hooks/useNow";
 import { useAppStore } from "@/store/useAppStore";
 import { toDeliveryInput } from "@/services/mappers";
+import { isDeliveryEditable } from "@/utils/delivery";
 import { issueLabel, priorityLabel } from "@/utils/format";
 import { isLate } from "@/utils/kpis";
 import { Badge } from "@/components/ui/Badge";
@@ -15,6 +16,9 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 
 type Panel = "none" | "form" | "csv";
 type Filter = "all" | "late" | DeliveryStatus;
+
+const NOT_EDITABLE_HINT =
+  "Edição disponível só para entregas aguardando — alterar o cadastro não recalcula a rota já otimizada.";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "Todas" },
@@ -241,8 +245,10 @@ const handleCreate = async (input: NewDelivery) => {
                       <button
                         type="button"
                         onClick={() => openEdit(d)}
+                        disabled={!isDeliveryEditable(d)}
+                        title={isDeliveryEditable(d) ? undefined : NOT_EDITABLE_HINT}
                         aria-label={`Editar entrega ${d.orderCode}`}
-                        className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+                        className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
@@ -273,7 +279,13 @@ const handleCreate = async (input: NewDelivery) => {
               <p className="text-xs text-slate-600">{selected.address}</p>
             </div>
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => openEdit(selected)} className="min-h-9 px-3 text-xs">
+              <Button
+                variant="secondary"
+                onClick={() => openEdit(selected)}
+                disabled={!isDeliveryEditable(selected)}
+                title={isDeliveryEditable(selected) ? undefined : NOT_EDITABLE_HINT}
+                className="min-h-9 px-3 text-xs"
+              >
                 Editar
               </Button>
               <Button variant="secondary" onClick={() => setSelected(null)} className="min-h-9 px-3 text-xs">
