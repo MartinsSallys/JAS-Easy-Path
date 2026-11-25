@@ -24,6 +24,9 @@ SERVICE_TIME_MIN = 8
 
 TEST_TIME_LIMIT_SECONDS = 5
 
+MIN_DISTANCE_M = 1110
+MAX_DISTANCE_M = 1113
+
 
 @pytest.fixture
 def optimizer() -> RouteEngineAdapter:
@@ -394,3 +397,29 @@ def test_solver_failure_statuses_are_distinct(
     assert response.status == expected
     assert response.routes == []
     assert len(response.unassigned) == 1
+
+
+def test_haversine_distancia_e_duracao() -> None:
+    ponto_a = OptimizationLocation(
+        latitude=0.0,
+        longitude=0.0,
+    )
+
+    ponto_b = OptimizationLocation(
+        latitude=0.0,
+        longitude=0.01,
+    )
+
+    distances, durations = HaversineMatrixProvider().build([ponto_a, ponto_b])
+
+    assert distances[0][0] == 0
+    assert distances[1][1] == 0
+
+    assert distances[0][1] == distances[1][0]
+
+    assert MIN_DISTANCE_M <= distances[0][1] <= MAX_DISTANCE_M
+
+    assert durations == [
+        [0, 2],
+        [2, 0],
+    ]
