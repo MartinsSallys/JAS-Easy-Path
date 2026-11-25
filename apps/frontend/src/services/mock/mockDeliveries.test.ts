@@ -90,4 +90,30 @@ describe("mockDeliveriesService.update — regra de edição por status", () => 
     expect(updated.issueReason).toBeNull();
     expect(updated.history.at(-1)?.text).toBe("Pedido editado");
   });
+
+  it("rejeita edição de entrega já vinculada a uma rota", async () => {
+    const linkedRoute: RoutePlan = {
+      ...route,
+      routes: [
+        {
+          vehicleId: "v1",
+          vehicleName: "Moto 01",
+          capacity: 12,
+          load: 1,
+          stopIds: ["del-1"],
+          distanceKm: 0,
+          durationMin: 0,
+          travelMin: 0,
+          waitMin: 0,
+          serviceMin: 0,
+        },
+      ],
+    };
+    const db: MockDb = { deliveries: [{ ...baseDelivery }], route: linkedRoute };
+    store.set(STORAGE_KEY, JSON.stringify(db));
+
+    await expect(mockDeliveriesService.update("del-1", input)).rejects.toThrow(
+      "Só é possível editar entregas aguardando",
+    );
+  });
 });

@@ -158,7 +158,9 @@ Substitui os dados cadastrais da entrega. Diferente do `PATCH` (3.3), que muda a
 
 Edição permitida apenas enquanto a entrega está `waiting_departure`: depois que a rota é otimizada, alterar o cadastro não recalcula a sequência já atribuída aos veículos.
 
-> **Mapeamento para o backend real:** `PUT /api/v1/entregas/{id}` (`EntregaUpdate`).
+> **Mapeamento para o backend real:** `PUT /api/v1/entregas/{id}` (`EntregaUpdate`). O frontend bloqueia a edição quando `rota_id` está preenchido (a entrega já está atribuída a uma rota) e consulta `GET /api/v1/entregas/{id}` antes do PUT para validar o vínculo e comparar o endereço.
+>
+> **Dependência pendente (backend):** a mesma validação precisa existir na API — impedir alteração de `endereco`/`janela_*` via `PUT /entregas/{id}` quando `rota_id != null` — para cobrir chamadas diretas fora do app. Alinhar com o responsável pela API em tarefa/PR separado.
 
 **Resposta `200 OK`:** Retorna o `DeliveryDTO` atualizado, com `"Pedido editado"` em `history`.
 **Resposta `422 Unprocessable Entity`:** Retorna `ApiErrorDTO` com `code: "validation_error"` (mesmas regras do cadastro).

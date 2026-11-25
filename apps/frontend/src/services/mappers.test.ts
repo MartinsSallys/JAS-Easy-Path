@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { toDeliveryInput, toNewDeliveryDTO, toRoutePlan } from "./mappers";
+import {
+  toDeliveryFromBackend,
+  toDeliveryInput,
+  toNewDeliveryDTO,
+  toRoutePlan,
+} from "./mappers";
 import type { Delivery } from "@/types/domain";
-import type { RoutePlanDTO } from "@/types/dto";
+import type { BackendEntregaResponseDTO, RoutePlanDTO } from "@/types/dto";
 
 const baseDelivery: Delivery = {
   id: "del-1",
@@ -47,6 +52,73 @@ describe("mappers", () => {
       hasExplicitTimeWindow: false,
     });
 
+    expect(input.windowStart).toBe("");
+    expect(input.windowEnd).toBe("");
+  });
+
+  it("preserva a janela no formulário quando a flag está ausente na entrega", () => {
+    const input = toDeliveryInput({
+      ...baseDelivery,
+      windowStart: "09:00",
+      windowEnd: "10:00",
+      hasExplicitTimeWindow: undefined,
+    });
+
+    expect(input.windowStart).toBe("09:00");
+    expect(input.windowEnd).toBe("10:00");
+  });
+
+  it("infere janela explícita e vínculo de rota a partir do DTO do backend", () => {
+    const dto: BackendEntregaResponseDTO = {
+      id: 1,
+      pedido_id: "#1001",
+      endereco: "Rua A, 10",
+      latitude: -13.37,
+      longitude: -39.07,
+      demanda: 1,
+      janela_inicio: "09:00",
+      janela_fim: "10:00",
+      observacoes: null,
+      status: "ATRIBUIDA",
+      created_at: "2026-11-23T08:00:00",
+      updated_at: "2026-11-23T08:00:00",
+      rota_id: 7,
+      parada_ordem: 3,
+    };
+
+    const delivery = toDeliveryFromBackend(dto);
+    expect(delivery.hasExplicitTimeWindow).toBe(true);
+    expect(delivery.routeId).toBe("7");
+
+    // E o formulário de edição recebe os horários preservados
+    const input = toDeliveryInput(delivery);
+    expect(input.windowStart).toBe("09:00");
+    expect(input.windowEnd).toBe("10:00");
+  });
+
+  it("trata janela igual ao expediente como herdada e sem vínculo quando rota_id é null", () => {
+    const dto: BackendEntregaResponseDTO = {
+      id: 2,
+      pedido_id: "#1002",
+      endereco: "Rua B, 20",
+      latitude: -13.37,
+      longitude: -39.07,
+      demanda: 1,
+      janela_inicio: null,
+      janela_fim: null,
+      observacoes: null,
+      status: "PENDENTE",
+      created_at: "2026-11-23T08:00:00",
+      updated_at: "2026-11-23T08:00:00",
+      rota_id: null,
+      parada_ordem: null,
+    };
+
+    const delivery = toDeliveryFromBackend(dto);
+    expect(delivery.hasExplicitTimeWindow).toBe(false);
+    expect(delivery.routeId).toBeNull();
+
+    const input = toDeliveryInput(delivery);
     expect(input.windowStart).toBe("");
     expect(input.windowEnd).toBe("");
   });

@@ -42,4 +42,27 @@ describe("isDeliveryEditable", () => {
       isDeliveryEditable({ ...base, status: "issue", issueReason: "customer_absent" }),
     ).toBe(false);
   });
+
+  it("bloqueia entrega aguardando que já está vinculada a uma rota", () => {
+    // O backend mapeia ATRIBUIDA para waiting_departure — só o rota_id a diferencia
+    expect(
+      isDeliveryEditable({ ...base, status: "waiting_departure", routeId: "7" }),
+    ).toBe(false);
+  });
+
+  it("bloqueia pendência de endereço vinculada a uma rota", () => {
+    expect(
+      isDeliveryEditable({
+        ...base,
+        status: "issue",
+        issueReason: "address_not_found",
+        routeId: "7",
+      }),
+    ).toBe(false);
+  });
+
+  it("permite editar quando o vínculo de rota está ausente ou nulo", () => {
+    expect(isDeliveryEditable({ ...base, routeId: null })).toBe(true);
+    expect(isDeliveryEditable({ ...base, routeId: undefined })).toBe(true);
+  });
 });

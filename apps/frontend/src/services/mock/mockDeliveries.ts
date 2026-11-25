@@ -3,7 +3,6 @@ import { isDeliveryEditable } from "@/utils/delivery";
 import { issueLabel } from "@/utils/format";
 import { currentHHmm } from "@/utils/time";
 import type { DeliveriesService } from "../deliveriesService";
-import { DEFAULT_WINDOW_END, DEFAULT_WINDOW_START } from "../mappers";
 import { fakeGeocode } from "./fakeGeocode";
 import { loadDb, recalcRoute, resetDb, saveDb, wait, type MockDb } from "./mockDb";
 
@@ -31,11 +30,17 @@ function removeStopFromVehicles(route: RoutePlan, targetId: string): RoutePlan {
   };
 }
 
-function change(id: string, update: (d: Delivery) => Delivery): Delivery {
+/** No mock o vínculo com rota (`routeId`) é derivado das paradas do plano do dia. */
+function routeIdOf(deliveryId: string, db: MockDb): string | null {
+  const linked = db.route.routes.some((r) => r.stopIds.includes(deliveryId));
+  return linked ? db.route.id : null;
+}
+
+function change(id: string, update: (d: Delivery, db: MockDb) => Delivery): Delivery {
   const db = loadDb();
   const current = db.deliveries.find((d) => d.id === id);
   if (!current) throw new Error("Entrega não encontrada.");
-  const updated = update(current);
+  const updated = update(current, db);
   saveDb({ ...db, deliveries: db.deliveries.map((d) => (d.id === id ? updated : d)) });
   return updated;
 }
@@ -43,7 +48,8 @@ function change(id: string, update: (d: Delivery) => Delivery): Delivery {
 export const mockDeliveriesService: DeliveriesService = {
   async list() {
     await wait();
-    return loadDb().deliveries;
+    const db = loadDb();
+    return db.deliveries.map((d) => ({ ...d, routeId: routeIdOf(d.id, db) }));
   },
 
   async create(input) {
@@ -71,8 +77,8 @@ export const mockDeliveriesService: DeliveriesService = {
   async update(id, input) {
     await wait();
     const origin = loadDb().route.origin;
-    const updated = change(id, (d) => {
-      if (!isDeliveryEditable(d)) {
+    const updated = change(id, (d, db) => {
+      if (!isDeliveryEditable({ ...d, routeId: routeIdOf(d.id, db) })) {
         throw new Error(
           "Só é possível editar entregas aguardando — a rota já otimizada não é recalculada.",
         );

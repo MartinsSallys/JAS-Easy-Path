@@ -236,8 +236,10 @@ export function toDeliveryInput(d: Delivery): NewDelivery {
     customerName: d.customerName,
     phone: d.phone,
     address: d.address,
-    windowStart: d.hasExplicitTimeWindow ? d.windowStart : "",
-    windowEnd: d.hasExplicitTimeWindow ? d.windowEnd : "",
+    // Só esvazia quando a janela é explicitamente herdada (flag === false);
+    // ausência da flag não pode apagar os horários existentes no formulário.
+    windowStart: d.hasExplicitTimeWindow === false ? "" : d.windowStart,
+    windowEnd: d.hasExplicitTimeWindow === false ? "" : d.windowEnd,
     priority: d.priority,
     notes,
   };
@@ -279,6 +281,10 @@ export function toDeliveryFromBackend(dto: BackendEntregaResponseDTO): Delivery 
   const status = BACKEND_TO_FRONT_STATUS[dto.status];
   const windowStart = dto.janela_inicio ? wallClockHHmm(dto.janela_inicio) : DEFAULT_WINDOW_START;
   const windowEnd = dto.janela_fim ? wallClockHHmm(dto.janela_fim) : DEFAULT_WINDOW_END;
+  // O backend grava janela vazia como o expediente, sem flag — tratamos a janela
+  // como explícita só quando difere do expediente padrão.
+  const hasExplicitTimeWindow =
+    windowStart !== DEFAULT_WINDOW_START || windowEnd !== DEFAULT_WINDOW_END;
 
   const history = [{ at: wallClockHHmm(dto.created_at), text: "Pedido cadastrado" }];
   if (dto.updated_at && dto.updated_at !== dto.created_at) {
@@ -298,6 +304,8 @@ export function toDeliveryFromBackend(dto: BackendEntregaResponseDTO): Delivery 
     lng: dto.longitude,
     windowStart,
     windowEnd,
+    hasExplicitTimeWindow,
+    routeId: dto.rota_id === null ? null : String(dto.rota_id),
     priority: parsed.priority,
     status,
     notes: parsed.notes,

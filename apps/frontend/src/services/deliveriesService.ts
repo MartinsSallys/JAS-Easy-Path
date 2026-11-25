@@ -12,6 +12,7 @@ import {
   toBackendEntregaCreateDTO,
   toDeliveryFromBackend,
 } from "./mappers";
+import { isDeliveryEditable } from "@/utils/delivery";
 import { mockDeliveriesService } from "./mock/mockDeliveries";
 
 /** O "contrato" que o resto do app usa. Mock e API real cumprem o MESMO contrato. */
@@ -43,8 +44,6 @@ async function geocodeAddress(address: string): Promise<{ latitude: number; long
 
 // Edição do cadastro substitui o recurso inteiro: PUT (api.md seção 3.4).
 // No backend real o equivalente é PUT /api/v1/entregas/{id}.
-const put = (path: string, body: unknown) =>
-  http<DeliveryDTO>(path, { method: "PUT", body: JSON.stringify(body) });
 
 export const httpDeliveriesService: DeliveriesService = {
   async list() {
@@ -102,9 +101,57 @@ async create(input) {
     return createdList.map(toDeliveryFromBackend);
   },
   async update(id, input) {
-    return toDelivery(
-      await put(`/deliveries/${id}`, toNewDeliveryDTO(input)),
-    );
+    const current = await http<BackendEntregaResponseDTO>(`/entregas/${id}`);
+    const existing = toDeliveryFromBackend(current);
+    if (!isDeliveryEditable(existing)) {
+      throw new HttpError(
+        409,
+        current.rota_id !== null
+          ? "Entrega já vinculada a uma rota — alterar o cadastro não recalcula a sequência otimizada."
+          : "Só é possível editar entregas aguardando saída.",
+      );
+    }
+
+    // Re-geocodifica só quando o endereço mudou, para não salvar endereço novo
+    // com coordenadas antigas.
+    const coords =
+      input.address.trim() === current.endereco.trim()
+        ? { latitude: current.latitude, longitude: current.longitude }
+        : await geocodeAddress(input.address);
+
+    const startRaw = input.windowStart.trim();
+    const endRaw = input.windowEnd.trim();
+    if ((startRaw === "") !== (endRaw === "")) {
+      throw new Error("Informe o início e o fim da janela, ou deixe os dois em branco.");
+    }
+
+    // Corrigir a pendência "endereço não localizado" devolve a entrega à fila.
+    const fixingAddressIssue =
+      existing.status === "issue" && existing.issueReason === "address_not_found";
+
+    const body: BackendEntregaUpdateDTO = {
+      pedido_id: input.orderCode.trim() || current.pedido_id,
+      endereco: input.address.trim(),
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      demanda: current.demanda,
+      // Janela vazia volta a herdar o expediente (api.md 3.4).
+      janela_inicio: startRaw === "" ? null : startRaw,
+      janela_fim: endRaw === "" ? null : endRaw,
+      observacoes: formatBackendObservacoes({
+        customerName: input.customerName,
+        phone: input.phone,
+        priority: input.priority,
+        notes: input.notes,
+      }),
+      status: fixingAddressIssue ? "PENDENTE" : undefined,
+    };
+
+    const updated = await http<BackendEntregaResponseDTO>(`/entregas/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return toDeliveryFromBackend(updated);
   },
   async remove(id) {
     await http<void>(`/entregas/${id}`, { method: "DELETE" });
