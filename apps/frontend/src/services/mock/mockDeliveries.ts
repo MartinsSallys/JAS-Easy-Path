@@ -2,6 +2,7 @@ import type { Delivery, NewDelivery, RoutePlan } from "@/types/domain";
 import { issueLabel } from "@/utils/format";
 import { currentHHmm } from "@/utils/time";
 import type { DeliveriesService } from "../deliveriesService";
+import { DEFAULT_WINDOW_END, DEFAULT_WINDOW_START } from "../mappers";
 import { fakeGeocode } from "./fakeGeocode";
 import { loadDb, recalcRoute, resetDb, saveDb, wait, type MockDb } from "./mockDb";
 
@@ -10,20 +11,13 @@ function build(input: NewDelivery, db: MockDb, position: number): Delivery {
     id: crypto.randomUUID(),
     ...input,
     orderCode: input.orderCode || `#${1001 + db.deliveries.length + position}`,
+    windowStart: input.windowStart.trim() || DEFAULT_WINDOW_START,
+    windowEnd: input.windowEnd.trim() || DEFAULT_WINDOW_END,
     ...fakeGeocode(input.address, db.route.origin),
     status: "waiting_departure",
     issueReason: null,
     completedAt: null,
     history: [{ at: currentHHmm(), text: "Pedido cadastrado" }],
-  };
-}
-
-function appendStopsToFirstVehicle(route: RoutePlan, newIds: string[]): RoutePlan {
-  if (route.routes.length === 0) return route;
-  const [first, ...rest] = route.routes;
-  return {
-    ...route,
-    routes: [{ ...first, stopIds: [...first.stopIds, ...newIds] }, ...rest],
   };
 }
 
@@ -56,12 +50,10 @@ export const mockDeliveriesService: DeliveriesService = {
     await wait();
     const db = loadDb();
     const created = build(input, db, 0);
-    saveDb(
-      recalcRoute({
-        deliveries: [...db.deliveries, created],
-        route: appendStopsToFirstVehicle(db.route, [created.id]),
-      }),
-    );
+    saveDb({
+      ...db,
+      deliveries: [...db.deliveries, created],
+    });
     return created;
   },
 
@@ -69,15 +61,10 @@ export const mockDeliveriesService: DeliveriesService = {
     await wait();
     const db = loadDb();
     const created = inputs.map((input, index) => build(input, db, index));
-    saveDb(
-      recalcRoute({
-        deliveries: [...db.deliveries, ...created],
-        route: appendStopsToFirstVehicle(
-          db.route,
-          created.map((d) => d.id),
-        ),
-      }),
-    );
+    saveDb({
+      ...db,
+      deliveries: [...db.deliveries, ...created],
+    });
     return created;
   },
 

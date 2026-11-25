@@ -96,6 +96,22 @@ export const httpRoutesService: RoutesService = {
 
     const rotaAtiva = rotasHoje.find((r) => r.status !== "CANCELADA") ?? null;
 
+    // Proteção global contra transferência entre rotas (independentemente da data):
+    // Se alguma entrega elegível já estiver vinculada a outra rota (ex.: rota de ontem ou
+    // tentativa de incorporar entregas novas numa rota existente), bloqueia antes de qualquer
+    // POST/PUT/DELETE até haver suporte transacional no backend.
+    const vinculadasAOutraRota = elegiveis.filter(
+      (e) => e.rota_id !== null && e.rota_id !== rotaAtiva?.id,
+    );
+    if (vinculadasAOutraRota.length > 0) {
+      throw new HttpError(
+        422,
+        `Existem ${vinculadasAOutraRota.length} entrega(s) já vinculada(s) a outra rota anterior. Para evitar perda de vínculos enquanto o backend não suporta transferência transacional entre rotas, conclua ou desvincule essas entregas antes de gerar uma nova rota.`,
+      );
+    }
+
+    // Caso 1: Já existe rota ativa hoje ->
+    // Se houver novas entregas ainda sem vínculo, bloqueia a substituição da rota ativa.
     if (rotaAtiva) {
       const novasSemVinculo = elegiveis.filter((e) => e.rota_id !== rotaAtiva.id);
       if (novasSemVinculo.length > 0) {
@@ -104,7 +120,9 @@ export const httpRoutesService: RoutesService = {
           `Já existe uma rota ativa hoje (${rotaAtiva.nome}) com entregas vinculadas. Para evitar perda de vínculos enquanto o backend não suporta substituição transacional, não é possível incorporar ${novasSemVinculo.length} nova(s) entrega(s) à rota existente.`,
         );
       }
-      
+
+      // Reotimiza a própria rota ativa in-place: se o solver retornar 422, o backend aborta
+      // antes de modificar paradas ou entregas.
       const reotimizada = await http<BackendRotaWithParadasResponseDTO>(
         `/rotas/${rotaAtiva.id}/otimizar`,
         {
@@ -115,6 +133,8 @@ export const httpRoutesService: RoutesService = {
       return toRoutePlanFromBackend(reotimizada, deposito, veiculo);
     }
 
+    // Caso 2: Primeira rota do dia (nenhuma rota ativa hoje e todas as entregas elegíveis sem vínculo) ->
+    // cria e otimiza. Se a otimização falhar, remove o rascunho recém-criado.
     const novaRota = await http<BackendRotaResponseDTO>("/rotas", {
       method: "POST",
       body: JSON.stringify({

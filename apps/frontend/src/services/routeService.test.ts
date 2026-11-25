@@ -9,12 +9,12 @@ const jsonResponse = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-describe("httpRoutesService — criação, reotimização segura e bloqueio com entregas novas", () => {
+describe("httpRoutesService — criação, reotimização segura e bloqueio de transferência entre rotas", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("cria e otimiza a primeira rota do dia apenas com entregas elegíveis (PENDENTE/ATRIBUIDA)", async () => {
+  it("cria e otimiza a primeira rota do dia apenas com entregas elegíveis e sem vínculo (PENDENTE/ATRIBUIDA)", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -139,7 +139,7 @@ describe("httpRoutesService — criação, reotimização segura e bloqueio com 
     expect(postRotaBody.entrega_ids).toEqual([12]);
   });
 
-  it("bloqueia substituição de rota ativa quando há novas entregas sem vínculo e preserva a rota existente", async () => {
+  it("bloqueia substituição de rota ativa de hoje quando há novas entregas sem vínculo e preserva a rota existente", async () => {
     const dbEntregas = [
       {
         id: 10,
@@ -249,13 +249,11 @@ describe("httpRoutesService — criação, reotimização segura e bloqueio com 
 
     await expect(httpRoutesService.optimize()).rejects.toThrow(HttpError);
 
-    // Garante que nenhuma requisição POST/PUT/DELETE foi disparada
     const mutatingCalls = fetchMock.mock.calls.filter(
       ([, init]) => (init?.method ?? "GET") !== "GET",
     );
     expect(mutatingCalls).toHaveLength(0);
 
-    // Garante que vínculos, status e paradas da rota 1 permanecem 100% intactos
     const entrega10 = dbEntregas.find((e) => e.id === 10)!;
     expect(entrega10.rota_id).toBe(1);
     expect(entrega10.status).toBe("ATRIBUIDA");
@@ -263,5 +261,94 @@ describe("httpRoutesService — criação, reotimização segura e bloqueio com 
     expect(dbRotas).toHaveLength(1);
     expect(dbRotas[0].status).toBe("OTIMIZADA");
     expect(dbRotas[0].paradas).toHaveLength(1);
+  });
+
+  it("bloqueia criação quando não há rota hoje mas existe entrega vinculada a rota de outro dia", async () => {
+    // Cenário: 1 entrega vinculada à rota otimizada de ontem (rota_id = 1) + 1 entrega nova hoje + nenhuma rota hoje
+    const dbEntregas = [
+      {
+        id: 10,
+        pedido_id: "#ONTEM-1",
+        endereco: "Rua Ontem, 1",
+        latitude: -13.37,
+        longitude: -39.07,
+        demanda: 1,
+        status: "ATRIBUIDA",
+        rota_id: 1 as number | null,
+        parada_ordem: 1 as number | null,
+        created_at: "2026-11-23T08:00:00",
+        updated_at: "2026-11-23T08:05:00",
+      },
+      {
+        id: 11,
+        pedido_id: "#HOJE-1",
+        endereco: "Rua Hoje, 2",
+        latitude: -13.38,
+        longitude: -39.08,
+        demanda: 1,
+        status: "PENDENTE",
+        rota_id: null as number | null,
+        parada_ordem: null as number | null,
+        created_at: "2026-11-24T09:00:00",
+        updated_at: "2026-11-24T09:00:00",
+      },
+    ];
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (url.includes("/depositos")) {
+        return jsonResponse([
+          {
+            id: 1,
+            nome: "Depósito",
+            endereco: "Centro",
+            latitude: -13.37,
+            longitude: -39.07,
+            ativo: true,
+            created_at: "2026-11-23T08:00:00",
+          },
+        ]);
+      }
+
+      if (url.includes("/veiculos")) {
+        return jsonResponse([
+          {
+            id: 1,
+            placa: "ABC-1234",
+            capacidade: 1,
+            tipo: "MOTO",
+            ativo: true,
+            created_at: "2026-11-23T08:00:00",
+          },
+        ]);
+      }
+
+      if (url.includes("/entregas") && method === "GET") {
+        return jsonResponse(dbEntregas);
+      }
+
+      // Nenhuma rota hoje
+      if (url.includes("/rotas?") && method === "GET") {
+        return jsonResponse([]);
+      }
+
+      throw new Error(`Não deveria mutar estado no backend: ${method} ${url}`);
+    });
+
+    await expect(httpRoutesService.optimize()).rejects.toThrow(HttpError);
+
+    // Nenhuma requisição POST/PUT/DELETE deve ocorrer
+    const mutatingCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init?.method ?? "GET") !== "GET",
+    );
+    expect(mutatingCalls).toHaveLength(0);
+
+    // Vínculo da entrega de ontem permanece 100% preservado
+    const entregaOntem = dbEntregas.find((e) => e.id === 10)!;
+    expect(entregaOntem.rota_id).toBe(1);
+    expect(entregaOntem.status).toBe("ATRIBUIDA");
+    expect(entregaOntem.parada_ordem).toBe(1);
   });
 });
