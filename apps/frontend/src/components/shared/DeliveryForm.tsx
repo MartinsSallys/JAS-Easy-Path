@@ -43,8 +43,13 @@ export function DeliveryForm({ onSubmit, onCancel, submitting }: DeliveryFormPro
     const found = validateNewDelivery(values);
     setErrors(found);
     if (Object.keys(found).length > 0) return;
-    await onSubmit(values);
-    setValues(EMPTY);
+
+    try {
+      await onSubmit(values);
+      setValues(EMPTY);
+    } catch {
+      // Erro exibido pelo banner global do store; valores digitados permanecem intactos
+    }
   };
 
   return (
@@ -110,7 +115,7 @@ export function DeliveryForm({ onSubmit, onCancel, submitting }: DeliveryFormPro
         <Field id="windowStart" label="Janela — Início (opcional)" error={errors.windowStart}>
           <input
             id="windowStart"
-            placeholder="HH:mm (ex.: 19:00)"
+            placeholder="HH:mm (ex.: 09:00)"
             className={inputClass(!!errors.windowStart)}
             value={values.windowStart}
             onChange={change("windowStart")}
@@ -121,7 +126,7 @@ export function DeliveryForm({ onSubmit, onCancel, submitting }: DeliveryFormPro
         <Field id="windowEnd" label="Janela — Fim (opcional)" error={errors.windowEnd}>
           <input
             id="windowEnd"
-            placeholder="HH:mm (ex.: 20:00 ou 24:00)"
+            placeholder="HH:mm (ex.: 17:00)"
             className={inputClass(!!errors.windowEnd)}
             value={values.windowEnd}
             onChange={change("windowEnd")}
@@ -146,7 +151,7 @@ export function DeliveryForm({ onSubmit, onCancel, submitting }: DeliveryFormPro
       </div>
 
       <p className="text-xs text-slate-500">
-        Deixe início e fim da janela em branco para usar o expediente padrão da loja (mínimo de 8 min quando preenchida).
+        Deixe início e fim da janela em branco para usar o expediente padrão de 08:00 às 18:00 (mínimo de 8 min quando preenchida).
       </p>
 
       <Field id="notes" label="Observações" error={errors.notes}>

@@ -4,7 +4,7 @@ import { validateNewDelivery } from "./validation";
 
 export const CSV_TEMPLATE =
   "pedido,cliente,telefone,endereco,janela_inicio,janela_fim,prioridade,observacoes\n" +
-  '#2001,Maria Souza,(71) 98888-1234,"Rua das Flores, 10 - Centro",19:00,19:30,normal,Portão azul\n';
+  '#2001,Maria Souza,(71) 98888-1234,"Rua das Flores, 10 - Centro",09:00,11:30,normal,Portão azul\n';
 
 const REQUIRED_COLUMNS = ["cliente", "endereco"];
 

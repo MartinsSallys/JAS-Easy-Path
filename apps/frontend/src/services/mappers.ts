@@ -1,5 +1,21 @@
-import type { Delivery, NewDelivery, Place, RoutePlan, VehicleRoute } from "@/types/domain";
 import type {
+  Delivery,
+  DeliveryStatus,
+  IssueReason,
+  NewDelivery,
+  Place,
+  Priority,
+  RoutePlan,
+  VehicleRoute,
+} from "@/types/domain";
+import type {
+  BackendDepositoResponseDTO,
+  BackendEntregaCreateDTO,
+  BackendEntregaResponseDTO,
+  BackendEntregaStatus,
+  BackendRotaStatus,
+  BackendRotaWithParadasResponseDTO,
+  BackendVeiculoResponseDTO,
   DeliveryDTO,
   NewDeliveryDTO,
   PlaceDTO,
@@ -8,21 +24,12 @@ import type {
   VehicleRouteDTO,
 } from "@/types/dto";
 
-/**
- * Traduz API -> front (domain.ts) e o caminho inverso.
- * TODA conversão de formato fica aqui: ids, horários, coordenadas, demanda, unidades, rotas.
- */
-
-/** Demanda enviada por entrega no MVP: cada pedido conta como 1 unidade de capacidade do veículo. */
 export const DEFAULT_DEMAND = 1;
+export const DEFAULT_WINDOW_START = "08:00";
+export const DEFAULT_WINDOW_END = "18:00";
 
 const MINUTES_PER_DAY = 1440;
 
-// ---------------------------------------------------------------------------
-// Horários
-// ---------------------------------------------------------------------------
-
-/** "19:30" -> 1170. Aceita "24:00" (1440 = fim do dia). Lança erro se o texto for inválido. */
 export function hhmmToMinutes(text: string): number {
   const match = /^(\d{1,2}):(\d{2})$/.exec(text.trim());
   if (!match) throw new Error(`Horário inválido: "${text}". Use HH:mm.`);
@@ -33,7 +40,6 @@ export function hhmmToMinutes(text: string): number {
   return hours * 60 + minutes;
 }
 
-/** 1170 -> "19:30". 1440 -> "24:00". */
 export function minutesToHHmm(totalMinutes: number): string {
   const clamped = Math.min(Math.max(Math.round(totalMinutes), 0), MINUTES_PER_DAY);
   const hours = Math.floor(clamped / 60);
@@ -42,19 +48,27 @@ export function minutesToHHmm(totalMinutes: number): string {
 }
 
 /**
- * "2026-11-19T19:50:00-03:00" -> "19:50".
- * Lê a hora do próprio texto, sem converter fuso: o front mostra a hora de parede enviada pela API.
- * Se o texto não for ISO (ex.: já "19:50"), devolve como veio.
+ * Lê hora HH:mm:
+ * - Se vier com offset explícito (ex.: "2026-11-19T19:50:00-03:00"), mantém a hora local do texto.
+ * - Se vier ISO naive do backend (UTC sem Z, ex.: "2026-11-24T16:00:00"), converte de UTC para o fuso local.
  */
 export function wallClockHHmm(value: string): string {
-  const match = /^\d{4}-\d{2}-\d{2}T(\d{2}:\d{2})/.exec(value);
-  return match ? match[1] : value;
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?[+-]\d{2}:\d{2}$/.test(trimmed)) {
+    return trimmed.slice(11, 16);
+  }
+  const naiveUtcMatch = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(Z)?$/.exec(trimmed);
+  if (naiveUtcMatch) {
+    const isoUtc = naiveUtcMatch[1] ? trimmed : `${trimmed}Z`;
+    const date = new Date(isoUtc);
+    if (!Number.isNaN(date.getTime())) {
+      return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    }
+  }
+  const timeMatch = /^(\d{2}:\d{2})(?::\d{2})?$/.exec(trimmed);
+  return timeMatch ? timeMatch[1] : trimmed;
 }
 
-/**
- * Janela do formulário/CSV (texto) -> janela da API (minutos).
- * Os dois vazios = sem janela própria (a API usa o expediente) -> null.
- */
 export function toTimeWindowDTO(windowStart: string, windowEnd: string): TimeWindowDTO | null {
   const start = windowStart.trim();
   const end = windowEnd.trim();
@@ -66,7 +80,102 @@ export function toTimeWindowDTO(windowStart: string, windowEnd: string): TimeWin
 }
 
 // ---------------------------------------------------------------------------
-// Entregas
+// Metadados seguros em observacoes (sem quebra por "|" ou "Cliente:")
+// ---------------------------------------------------------------------------
+
+interface ObservacoesMetaPayload {
+  c?: string;
+  p?: string;
+  pr?: Priority;
+  r?: IssueReason | null;
+}
+
+interface ParsedObservacoes {
+  customerName: string;
+  phone: string;
+  priority: Priority;
+  issueReason: IssueReason | null;
+  notes: string;
+}
+
+const META_MARKER = "\n[JAS_META]:";
+const VALID_PRIORITIES: Priority[] = ["low", "normal", "high"];
+const VALID_REASONS: IssueReason[] = [
+  "customer_absent",
+  "address_not_found",
+  "customer_refused",
+  "operational",
+  "other",
+];
+
+export function formatBackendObservacoes(meta: {
+  customerName?: string;
+  phone?: string;
+  priority?: Priority;
+  issueReason?: IssueReason | null;
+  notes?: string;
+}): string | null {
+  const payload: ObservacoesMetaPayload = {};
+  if (meta.customerName?.trim()) payload.c = meta.customerName.trim();
+  if (meta.phone?.trim()) payload.p = meta.phone.trim();
+  if (meta.priority && meta.priority !== "normal") payload.pr = meta.priority;
+  if (meta.issueReason) payload.r = meta.issueReason;
+
+  const cleanNotes = (meta.notes ?? "").trim();
+  const hasMeta = Object.keys(payload).length > 0;
+
+  if (!cleanNotes && !hasMeta) return null;
+  if (!hasMeta) return cleanNotes;
+  return `${cleanNotes}${META_MARKER}${JSON.stringify(payload)}`;
+}
+
+export function parseBackendObservacoes(
+  raw: string | null,
+  fallbackCustomer: string,
+): ParsedObservacoes {
+  if (!raw) {
+    return {
+      customerName: fallbackCustomer,
+      phone: "",
+      priority: "normal",
+      issueReason: null,
+      notes: "",
+    };
+  }
+
+  const markerIdx = raw.lastIndexOf(META_MARKER);
+  if (markerIdx !== -1) {
+    const notesPart = raw.slice(0, markerIdx).trim();
+    const jsonPart = raw.slice(markerIdx + META_MARKER.length).trim();
+    try {
+      const parsed = JSON.parse(jsonPart) as ObservacoesMetaPayload;
+      const priority =
+        parsed.pr && VALID_PRIORITIES.includes(parsed.pr) ? parsed.pr : "normal";
+      const issueReason =
+        parsed.r && VALID_REASONS.includes(parsed.r) ? parsed.r : null;
+      return {
+        customerName: parsed.c?.trim() || fallbackCustomer,
+        phone: parsed.p?.trim() ?? "",
+        priority,
+        issueReason,
+        notes: notesPart,
+      };
+    } catch {
+      // fallback abaixo se JSON inválido
+    }
+  }
+
+  return {
+    customerName: fallbackCustomer,
+    phone: "",
+    priority: "normal",
+    issueReason: null,
+    notes: raw.trim(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Entregas (Contrato legado/mock + Backend FastAPI real)
 // ---------------------------------------------------------------------------
 
 function toPlace(dto: PlaceDTO): Place {
@@ -122,8 +231,90 @@ export function toNewDeliveryDTO(input: NewDelivery): NewDeliveryDTO {
   };
 }
 
+const BACKEND_TO_FRONT_STATUS: Record<BackendEntregaStatus, DeliveryStatus> = {
+  PENDENTE: "waiting_departure",
+  ATRIBUIDA: "waiting_departure",
+  EM_ROTA: "in_progress",
+  ENTREGUE: "completed",
+  FALHA: "issue",
+  CANCELADA: "issue",
+};
+
+const BACKEND_STATUS_LABEL: Record<BackendEntregaStatus, string> = {
+  PENDENTE: "Aguardando saída",
+  ATRIBUIDA: "Atribuída à rota",
+  EM_ROTA: "Em rota",
+  ENTREGUE: "Entrega concluída",
+  FALHA: "Pendência registrada",
+  CANCELADA: "Entrega cancelada",
+};
+
+export function toDeliveryFromBackend(dto: BackendEntregaResponseDTO): Delivery {
+  const parsed = parseBackendObservacoes(dto.observacoes, `Pedido ${dto.pedido_id}`);
+  const status = BACKEND_TO_FRONT_STATUS[dto.status];
+  const windowStart = dto.janela_inicio ? wallClockHHmm(dto.janela_inicio) : DEFAULT_WINDOW_START;
+  const windowEnd = dto.janela_fim ? wallClockHHmm(dto.janela_fim) : DEFAULT_WINDOW_END;
+
+  const history = [{ at: wallClockHHmm(dto.created_at), text: "Pedido cadastrado" }];
+  if (dto.updated_at && dto.updated_at !== dto.created_at) {
+    history.push({
+      at: wallClockHHmm(dto.updated_at),
+      text: BACKEND_STATUS_LABEL[dto.status],
+    });
+  }
+
+  return {
+    id: String(dto.id),
+    orderCode: dto.pedido_id,
+    customerName: parsed.customerName,
+    phone: parsed.phone,
+    address: dto.endereco,
+    lat: dto.latitude,
+    lng: dto.longitude,
+    windowStart,
+    windowEnd,
+    priority: parsed.priority,
+    status,
+    notes: parsed.notes,
+    issueReason: status === "issue" ? (parsed.issueReason ?? "other") : null,
+    completedAt: status === "completed" ? wallClockHHmm(dto.updated_at) : null,
+    history,
+  };
+}
+
+export function toBackendEntregaCreateDTO(
+  input: NewDelivery,
+  coords: { latitude: number; longitude: number },
+  fallbackIndex = 1,
+): BackendEntregaCreateDTO {
+  const startRaw = input.windowStart.trim();
+  const endRaw = input.windowEnd.trim();
+  if ((startRaw === "") !== (endRaw === "")) {
+    throw new Error("Informe o início e o fim da janela, ou deixe os dois em branco.");
+  }
+
+  const orderCode =
+    input.orderCode.trim() || `#${Date.now().toString().slice(-4)}-${fallbackIndex}`;
+
+  return {
+    pedido_id: orderCode,
+    endereco: input.address.trim(),
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+    demanda: DEFAULT_DEMAND,
+    janela_inicio: startRaw === "" ? DEFAULT_WINDOW_START : startRaw,
+    janela_fim: endRaw === "" ? DEFAULT_WINDOW_END : endRaw,
+    observacoes: formatBackendObservacoes({
+      customerName: input.customerName,
+      phone: input.phone,
+      priority: input.priority,
+      notes: input.notes,
+    }),
+  };
+}
+
 // ---------------------------------------------------------------------------
-// Rota (suporte a múltiplos veículos)
+// Rota (Contrato legado/mock + Backend FastAPI real)
 // ---------------------------------------------------------------------------
 
 function toVehicleRoute(dto: VehicleRouteDTO): VehicleRoute {
@@ -155,5 +346,58 @@ export function toRoutePlan(dto: RoutePlanDTO): RoutePlan {
     totalDurationMin,
     status: dto.status,
     isSimulation: dto.matrix_source === "manual",
+  };
+}
+
+const BACKEND_ROTA_STATUS: Record<BackendRotaStatus, RoutePlan["status"]> = {
+  RASCUNHO: "planned",
+  OTIMIZADA: "planned",
+  EM_ANDAMENTO: "running",
+  CONCLUIDA: "finished",
+  CANCELADA: "finished",
+};
+
+export function toRoutePlanFromBackend(
+  rota: BackendRotaWithParadasResponseDTO,
+  deposito: BackendDepositoResponseDTO,
+  veiculo: BackendVeiculoResponseDTO | null,
+): RoutePlan {
+  const deliveryStops = [...rota.paradas]
+    .filter((p) => p.entrega_id !== null)
+    .sort((a, b) => a.ordem - b.ordem);
+
+  const stopIds = deliveryStops.map((p) => String(p.entrega_id));
+  const load = deliveryStops.reduce((sum, p) => sum + (p.demanda || DEFAULT_DEMAND), 0);
+  const serviceMin = deliveryStops.reduce((sum, p) => sum + (p.tempo_servico_min || 8), 0);
+  const distanceKm = Math.round((rota.distancia_total_km ?? 0) * 10) / 10;
+  const durationMin = rota.tempo_total_min ?? serviceMin;
+  const travelMin = Math.max(durationMin - serviceMin, 0);
+
+  const vehicleRoute: VehicleRoute = {
+    vehicleId: veiculo ? String(veiculo.id) : String(rota.veiculo_id ?? 1),
+    vehicleName: veiculo ? `${veiculo.tipo} (${veiculo.placa})` : "Veículo padrão",
+    capacity: veiculo ? veiculo.capacidade : Math.max(load, 10),
+    load,
+    stopIds,
+    distanceKm,
+    durationMin,
+    travelMin,
+    waitMin: 0,
+    serviceMin,
+  };
+
+  return {
+    id: String(rota.id),
+    origin: {
+      name: deposito.nome,
+      address: deposito.endereco,
+      lat: deposito.latitude,
+      lng: deposito.longitude,
+    },
+    routes: stopIds.length > 0 || rota.status === "OTIMIZADA" ? [vehicleRoute] : [],
+    totalDistanceKm: distanceKm,
+    totalDurationMin: durationMin,
+    status: BACKEND_ROTA_STATUS[rota.status],
+    isSimulation: false,
   };
 }
