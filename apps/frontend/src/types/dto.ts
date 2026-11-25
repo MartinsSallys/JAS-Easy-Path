@@ -1,22 +1,10 @@
 import type { DeliveryStatus, IssueReason, Priority } from "./domain";
 
-/**
- * DTOs = o formato EXATO do JSON que trafega na API (snake_case).
- * Contrato alinhado em docs/api.md (issues #5, #6, #7 e #8):
- *  - IDs: número inteiro no motor/API. O front converte para string em mappers.ts.
- *  - Coordenadas: objeto { latitude, longitude }.
- *  - Horário do dia: minutos desde 00:00 (0 a 1440; 1440 = 24:00, fim do dia).
- *  - Duração: minutos decorridos (_min). Distância: metros inteiros (_m).
- *  - Capacidade/Demanda no MVP: medida em quantidade de pedidos (cada entrega = 1 unidade).
- *  - Regra de otimização: todas as entregas são obrigatórias (sem solução parcial).
- */
-
 export interface LocationDTO {
   latitude: number;
   longitude: number;
 }
 
-/** Janela de entrega em minutos desde 00:00. Ex.: 19:00 a 19:30 = { start: 1140, end: 1170 }. */
 export interface TimeWindowDTO {
   start: number;
   end: number;
@@ -38,7 +26,7 @@ export interface DeliveryDTO {
   location: LocationDTO | null;
   geocoding_status: GeocodingStatus;
   geocoding_message: string | null;
-  demand: number; 
+  demand: number;
   time_window: TimeWindowDTO;
   has_explicit_time_window: boolean;
   priority: Priority;
@@ -69,7 +57,7 @@ export interface PlaceDTO {
 export interface VehicleDTO {
   id: number;
   name: string;
-  capacity: number; 
+  capacity: number;
 }
 
 export interface RouteStopDTO {
@@ -89,13 +77,8 @@ export interface VehicleRouteDTO {
   total_min: number;
 }
 
-/** "manual" = matriz informada à mão (estimativa); "road_network" = distâncias/tempos reais por ruas. */
 export type MatrixSource = "manual" | "road_network";
 
-/**
- * O plano do dia. GET /routes/today e POST /routes/today/optimize devolvem este formato
- * apenas quando TODAS as entregas válidas do dia foram atendidas.
- */
 export interface RoutePlanDTO {
   id: number;
   status: "planned" | "running" | "finished";
@@ -116,16 +99,145 @@ export interface ErrorDetailDTO {
   index: number | null;
 }
 
-/**
- * Corpo de erro (HTTP 422):
- * - "validation_error": dados inválidos
- * - "no_feasible_solution": impossível atender todas as entregas com os veículos/janelas atuais
- * - "solver_timeout": motor não encontrou solução viável dentro do tempo limite
- */
 export interface ApiErrorDTO {
   error: {
     code: ApiErrorCode | string;
     message: string;
     details: ErrorDetailDTO[];
   };
+}
+
+// ---------------------------------------------------------------------------
+// Schemas reais do backend FastAPI (/api/v1)
+// ---------------------------------------------------------------------------
+
+export type BackendEntregaStatus =
+  | "PENDENTE"
+  | "ATRIBUIDA"
+  | "EM_ROTA"
+  | "ENTREGUE"
+  | "FALHA"
+  | "CANCELADA";
+
+export type BackendRotaStatus =
+  | "RASCUNHO"
+  | "OTIMIZADA"
+  | "EM_ANDAMENTO"
+  | "CONCLUIDA"
+  | "CANCELADA";
+
+export type BackendParadaStatus =
+  | "PENDENTE"
+  | "EM_ANDAMENTO"
+  | "CONCLUIDA"
+  | "FALHA"
+  | "PULADA";
+
+export interface BackendEntregaCreateDTO {
+  pedido_id: string;
+  endereco: string;
+  latitude: number;
+  longitude: number;
+  demanda: number;
+  janela_inicio: string | null;
+  janela_fim: string | null;
+  observacoes: string | null;
+}
+
+export interface BackendEntregaUpdateDTO {
+  pedido_id?: string;
+  endereco?: string;
+  latitude?: number;
+  longitude?: number;
+  demanda?: number;
+  janela_inicio?: string | null;
+  janela_fim?: string | null;
+  observacoes?: string | null;
+  status?: BackendEntregaStatus;
+}
+
+export interface BackendEntregaResponseDTO {
+  id: number;
+  pedido_id: string;
+  endereco: string;
+  latitude: number;
+  longitude: number;
+  demanda: number;
+  janela_inicio: string | null;
+  janela_fim: string | null;
+  observacoes: string | null;
+  status: BackendEntregaStatus;
+  created_at: string;
+  updated_at: string;
+  rota_id: number | null;
+  parada_ordem: number | null;
+}
+
+export interface BackendDepositoResponseDTO {
+  id: number;
+  nome: string;
+  endereco: string;
+  latitude: number;
+  longitude: number;
+  ativo: boolean;
+  created_at: string;
+}
+
+export interface BackendVeiculoResponseDTO {
+  id: number;
+  placa: string;
+  capacidade: number;
+  tipo: "MOTO" | "CARRO" | "CAMINHAO" | "VAN";
+  ativo: boolean;
+  created_at: string;
+}
+
+export interface BackendParadaResponseDTO {
+  id: number;
+  rota_id: number;
+  entrega_id: number | null;
+  deposito_id: number | null;
+  ordem: number;
+  endereco: string;
+  latitude: number;
+  longitude: number;
+  demanda: number;
+  janela_inicio: string | null;
+  janela_fim: string | null;
+  tempo_servico_min: number;
+  chegada_prevista: string | null;
+  saida_prevista: string | null;
+  observacoes: string | null;
+  status: BackendParadaStatus;
+}
+
+export interface BackendRotaResponseDTO {
+  id: number;
+  nome: string;
+  data: string;
+  deposito_id: number;
+  veiculo_id: number | null;
+  status: BackendRotaStatus;
+  distancia_total_km: number | null;
+  tempo_total_min: number | null;
+  created_at: string;
+  updated_at: string;
+  otimizada_em: string | null;
+}
+
+export interface BackendRotaWithParadasResponseDTO extends BackendRotaResponseDTO {
+  paradas: BackendParadaResponseDTO[];
+}
+
+export interface BackendGeocodeResultDTO {
+  latitude: number;
+  longitude: number;
+  display_name: string;
+  confidence: number;
+  address_components: Record<string, unknown>;
+}
+
+export interface BackendGeocodeResponseDTO {
+  results: BackendGeocodeResultDTO[];
+  ambiguous: boolean;
 }

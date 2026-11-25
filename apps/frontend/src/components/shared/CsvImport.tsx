@@ -26,12 +26,14 @@ export function CsvImport({ onImport, onClose, importing }: CsvImportProps) {
   const valid = result?.rows.filter((row) => row.errors.length === 0) ?? [];
   const invalidCount = (result?.rows.length ?? 0) - valid.length;
 
-  const confirm = async () => {
-    if (valid.length === 0) return;
-    await onImport(valid.map((row) => row.delivery));
-    onClose();
+const confirm = async () => {
+    try {
+      await onImport(valid.map((row) => row.delivery));
+      onClose();
+    } catch {
+      // Erro exibido no banner global do store; pré-visualização permanece aberta
+    }
   };
-
   const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(CSV_TEMPLATE)}`;
 
   return (

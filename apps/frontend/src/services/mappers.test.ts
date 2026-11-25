@@ -23,7 +23,7 @@ const baseDelivery: Delivery = {
 };
 
 describe("mappers", () => {
-  it("mapeia janela vazia para time_window: null e demand: 1", () => {
+  it("mapeia janela vazia para time_window: null e demand: 1 no DTO padrão", () => {
     const dto = toNewDeliveryDTO({
       orderCode: "#201",
       customerName: "Mariana",
