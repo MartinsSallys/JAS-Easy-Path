@@ -45,6 +45,7 @@ const completedDelivery: Delivery = {
   lng: -39.07,
   windowStart: "18:00",
   windowEnd: "20:00",
+  hasExplicitTimeWindow: true,
   priority: "normal",
   status: "completed",
   notes: "",

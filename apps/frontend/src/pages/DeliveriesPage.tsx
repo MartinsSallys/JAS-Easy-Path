@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { FileSpreadsheet, Plus, Search, Trash2 } from "lucide-react";
+import { FileSpreadsheet, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import type { Delivery, DeliveryStatus, NewDelivery } from "@/types/domain";
 import { useNow } from "@/hooks/useNow";
 import { useAppStore } from "@/store/useAppStore";
+import { toDeliveryInput } from "@/services/mappers";
+import { isDeliveryEditable } from "@/utils/delivery";
 import { issueLabel, priorityLabel } from "@/utils/format";
 import { isLate } from "@/utils/kpis";
 import { Badge } from "@/components/ui/Badge";
@@ -14,6 +16,9 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 
 type Panel = "none" | "form" | "csv";
 type Filter = "all" | "late" | DeliveryStatus;
+
+const NOT_EDITABLE_HINT =
+  "Edição disponível só para entregas aguardando — alterar o cadastro não recalcula a rota já otimizada.";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "Todas" },
@@ -29,10 +34,12 @@ export default function DeliveriesPage() {
   const loading = useAppStore((s) => s.loading);
   const addDelivery = useAppStore((s) => s.addDelivery);
   const importDeliveries = useAppStore((s) => s.importDeliveries);
+  const updateDelivery = useAppStore((s) => s.updateDelivery);
   const removeDelivery = useAppStore((s) => s.removeDelivery);
   const now = useNow();
 
   const [panel, setPanel] = useState<Panel>("none");
+  const [editing, setEditing] = useState<Delivery | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Delivery | null>(null);
@@ -48,6 +55,34 @@ export default function DeliveriesPage() {
 const handleCreate = async (input: NewDelivery) => {
     await addDelivery(input);
     setFeedback("Entrega cadastrada com sucesso.");
+    setPanel("none");
+  };
+
+  const handleUpdate = async (input: NewDelivery) => {
+    if (!editing) return;
+    await updateDelivery(editing.id, input);
+    if (selected?.id === editing.id) {
+      setSelected(useAppStore.getState().deliveries.find((d) => d.id === editing.id) ?? null);
+    }
+    setFeedback(`Entrega ${editing.orderCode} atualizada.`);
+    setEditing(null);
+    setPanel("none");
+  };
+
+  const openCreate = () => {
+    setFeedback(null);
+    setEditing(null);
+    setPanel((p) => (p === "form" ? "none" : "form"));
+  };
+
+  const openEdit = (d: Delivery) => {
+    setFeedback(null);
+    setEditing(d);
+    setPanel("form");
+  };
+
+  const closeForm = () => {
+    setEditing(null);
     setPanel("none");
   };
 
@@ -87,12 +122,7 @@ const handleCreate = async (input: NewDelivery) => {
             <FileSpreadsheet className="h-4 w-4" />
             Importar CSV
           </Button>
-          <Button
-            onClick={() => {
-              setFeedback(null);
-              setPanel((p) => (p === "form" ? "none" : "form"));
-            }}
-          >
+          <Button onClick={openCreate}>
             <Plus className="h-4 w-4" />
             Nova entrega
           </Button>
@@ -114,8 +144,10 @@ const handleCreate = async (input: NewDelivery) => {
       {panel === "form" ? (
         <Card>
           <DeliveryForm
-            onSubmit={handleCreate}
-            onCancel={() => setPanel("none")}
+            key={editing?.id ?? "new"}
+            initialValues={editing ? toDeliveryInput(editing) : undefined}
+            onSubmit={editing ? handleUpdate : handleCreate}
+            onCancel={closeForm}
             submitting={loading}
           />
         </Card>
@@ -212,6 +244,16 @@ const handleCreate = async (input: NewDelivery) => {
                     <td className="py-3 pl-3 text-right" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
+                        onClick={() => openEdit(d)}
+                        disabled={!isDeliveryEditable(d)}
+                        title={isDeliveryEditable(d) ? undefined : NOT_EDITABLE_HINT}
+                        aria-label={`Editar entrega ${d.orderCode}`}
+                        className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => void handleRemove(d)}
                         aria-label={`Excluir entrega ${d.orderCode}`}
                         className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
@@ -236,9 +278,20 @@ const handleCreate = async (input: NewDelivery) => {
               </h2>
               <p className="text-xs text-slate-600">{selected.address}</p>
             </div>
-            <Button variant="secondary" onClick={() => setSelected(null)} className="min-h-9 px-3 text-xs">
-              Fechar
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => openEdit(selected)}
+                disabled={!isDeliveryEditable(selected)}
+                title={isDeliveryEditable(selected) ? undefined : NOT_EDITABLE_HINT}
+                className="min-h-9 px-3 text-xs"
+              >
+                Editar
+              </Button>
+              <Button variant="secondary" onClick={() => setSelected(null)} className="min-h-9 px-3 text-xs">
+                Fechar
+              </Button>
+            </div>
           </div>
 
           {selected.issueReason ? (

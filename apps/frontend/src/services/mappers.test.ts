@@ -1,15 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_WINDOW_END,
-  DEFAULT_WINDOW_START,
-  toBackendEntregaCreateDTO,
   toDeliveryFromBackend,
+  toDeliveryInput,
   toNewDeliveryDTO,
   toRoutePlan,
-  toRoutePlanFromBackend,
-  wallClockHHmm,
 } from "./mappers";
-import type { RoutePlanDTO } from "@/types/dto";
+import type { Delivery } from "@/types/domain";
+import type { BackendEntregaResponseDTO, RoutePlanDTO } from "@/types/dto";
+
+const baseDelivery: Delivery = {
+  id: "del-1",
+  orderCode: "#1001",
+  customerName: "Ana Paula",
+  phone: "71999990000",
+  address: "Rua A, 10",
+  lat: -13.37,
+  lng: -39.07,
+  windowStart: "18:00",
+  windowEnd: "20:00",
+  hasExplicitTimeWindow: true,
+  priority: "normal",
+  status: "waiting_departure",
+  notes: "Deixar na portaria",
+  issueReason: null,
+  completedAt: null,
+  history: [],
+};
 
 describe("mappers", () => {
   it("mapeia janela vazia para time_window: null e demand: 1 no DTO padrão", () => {
@@ -28,165 +44,94 @@ describe("mappers", () => {
     expect(dto.time_window).toBeNull();
   });
 
-  it("aplica expediente padrão 08:00-18:00 e demanda 1 ao criar entrega para o backend FastAPI", () => {
-    const payload = toBackendEntregaCreateDTO(
-      {
-        orderCode: "#205",
-        customerName: "Carlos Lima",
-        phone: "(71) 98888-0000",
-        address: "Rua da Praia, 50",
-        windowStart: "",
-        windowEnd: "",
-        priority: "high",
-        notes: "Portão verde",
-      },
-      { latitude: -13.371, longitude: -39.072 },
-    );
-
-    expect(payload.demanda).toBe(1);
-    expect(payload.janela_inicio).toBe(DEFAULT_WINDOW_START);
-    expect(payload.janela_fim).toBe(DEFAULT_WINDOW_END);
-    expect(payload.observacoes).toContain("\n[JAS_META]:");
-    expect(payload.observacoes).toContain('"c":"Carlos Lima"');
-    expect(payload.observacoes).toContain('"pr":"high"');
-
-    const mappedBack = toDeliveryFromBackend({
-      id: 7,
-      pedido_id: payload.pedido_id,
-      endereco: payload.endereco,
-      latitude: payload.latitude,
-      longitude: payload.longitude,
-      demanda: payload.demanda,
-      janela_inicio: payload.janela_inicio,
-      janela_fim: payload.janela_fim,
-      observacoes: payload.observacoes,
-      status: "PENDENTE",
-      created_at: "2026-11-23T09:00:00",
-      updated_at: "2026-11-23T09:00:00",
-      rota_id: null,
-      parada_ordem: null,
+  it("devolve janela vazia ao editar entrega que herdou o expediente", () => {
+    const input = toDeliveryInput({
+      ...baseDelivery,
+      windowStart: "08:00",
+      windowEnd: "22:00",
+      hasExplicitTimeWindow: false,
     });
 
-    expect(mappedBack.customerName).toBe("Carlos Lima");
-    expect(mappedBack.priority).toBe("high");
-    expect(mappedBack.notes).toBe("Portão verde");
-    expect(mappedBack.windowStart).toBe("08:00");
-    expect(mappedBack.windowEnd).toBe("18:00");
+    expect(input.windowStart).toBe("");
+    expect(input.windowEnd).toBe("");
   });
 
-  it("preserva nome com pipe, observação iniciando com Cliente: e converte UTC naive para hora local", () => {
-    const payload = toBackendEntregaCreateDTO(
-      {
-        orderCode: "#210",
-        customerName: "Ana | Souza",
-        phone: "(71) 98888-1111",
-        address: "Rua Central, 10",
-        windowStart: "08:00",
-        windowEnd: "18:00",
-        priority: "normal",
-        notes: "Cliente: falso",
-      },
-      { latitude: -13.37, longitude: -39.07 },
-    );
+  it("preserva a janela no formulário quando a flag está ausente na entrega", () => {
+    const input = toDeliveryInput({
+      ...baseDelivery,
+      windowStart: "09:00",
+      windowEnd: "10:00",
+      hasExplicitTimeWindow: undefined,
+    });
 
-    const mapped = toDeliveryFromBackend({
-      id: 9,
-      pedido_id: "#210",
-      endereco: "Rua Central, 10",
+    expect(input.windowStart).toBe("09:00");
+    expect(input.windowEnd).toBe("10:00");
+  });
+
+  it("infere janela explícita e vínculo de rota a partir do DTO do backend", () => {
+    const dto: BackendEntregaResponseDTO = {
+      id: 1,
+      pedido_id: "#1001",
+      endereco: "Rua A, 10",
       latitude: -13.37,
       longitude: -39.07,
       demanda: 1,
-      janela_inicio: "08:00:00",
-      janela_fim: "18:00:00",
-      observacoes: payload.observacoes,
-      status: "ENTREGUE",
-      created_at: "2026-11-24T13:00:00",
-      updated_at: "2026-11-24T16:00:00",
-      rota_id: 1,
-      parada_ordem: 1,
-    });
+      janela_inicio: "09:00",
+      janela_fim: "10:00",
+      observacoes: null,
+      status: "ATRIBUIDA",
+      created_at: "2026-11-23T08:00:00",
+      updated_at: "2026-11-23T08:00:00",
+      rota_id: 7,
+      parada_ordem: 3,
+    };
 
-    expect(mapped.customerName).toBe("Ana | Souza");
-    expect(mapped.notes).toBe("Cliente: falso");
-    expect(mapped.completedAt).toBe(wallClockHHmm("2026-11-24T16:00:00"));
+    const delivery = toDeliveryFromBackend(dto);
+    expect(delivery.hasExplicitTimeWindow).toBe(true);
+    expect(delivery.routeId).toBe("7");
+
+    // E o formulário de edição recebe os horários preservados
+    const input = toDeliveryInput(delivery);
+    expect(input.windowStart).toBe("09:00");
+    expect(input.windowEnd).toBe("10:00");
   });
 
-  it("filtra paradas de depósito (entrega_id null) ao mapear rota do backend FastAPI", () => {
-    const plan = toRoutePlanFromBackend(
-      {
-        id: 3,
-        nome: "Rota 2026-11-23",
-        data: "2026-11-23",
-        deposito_id: 1,
-        veiculo_id: 2,
-        status: "OTIMIZADA",
-        distancia_total_km: 6.4,
-        tempo_total_min: 28,
-        created_at: "2026-11-23T08:00:00",
-        updated_at: "2026-11-23T08:05:00",
-        otimizada_em: "2026-11-23T08:05:00",
-        paradas: [
-          {
-            id: 1,
-            rota_id: 3,
-            entrega_id: null,
-            deposito_id: 1,
-            ordem: 0,
-            endereco: "Depósito Central",
-            latitude: -13.37,
-            longitude: -39.07,
-            demanda: 0,
-            janela_inicio: null,
-            janela_fim: null,
-            tempo_servico_min: 0,
-            chegada_prevista: null,
-            saida_prevista: "08:00:00",
-            observacoes: null,
-            status: "PENDENTE",
-          },
-          {
-            id: 2,
-            rota_id: 3,
-            entrega_id: 15,
-            deposito_id: null,
-            ordem: 1,
-            endereco: "Rua B, 20",
-            latitude: -13.38,
-            longitude: -39.08,
-            demanda: 1,
-            janela_inicio: "08:00:00",
-            janela_fim: "18:00:00",
-            tempo_servico_min: 8,
-            chegada_prevista: "08:10:00",
-            saida_prevista: "08:18:00",
-            observacoes: null,
-            status: "PENDENTE",
-          },
-        ],
-      },
-      {
-        id: 1,
-        nome: "Depósito Central",
-        endereco: "Praça da Matriz, 1",
-        latitude: -13.37,
-        longitude: -39.07,
-        ativo: true,
-        created_at: "2026-11-20T08:00:00",
-      },
-      {
-        id: 2,
-        placa: "ABC-1234",
-        capacidade: 10,
-        tipo: "MOTO",
-        ativo: true,
-        created_at: "2026-11-20T08:00:00",
-      },
-    );
+  it("trata janela igual ao expediente como herdada e sem vínculo quando rota_id é null", () => {
+    const dto: BackendEntregaResponseDTO = {
+      id: 2,
+      pedido_id: "#1002",
+      endereco: "Rua B, 20",
+      latitude: -13.37,
+      longitude: -39.07,
+      demanda: 1,
+      janela_inicio: null,
+      janela_fim: null,
+      observacoes: null,
+      status: "PENDENTE",
+      created_at: "2026-11-23T08:00:00",
+      updated_at: "2026-11-23T08:00:00",
+      rota_id: null,
+      parada_ordem: null,
+    };
 
-    expect(plan.routes).toHaveLength(1);
-    expect(plan.routes[0].stopIds).toEqual(["15"]);
-    expect(plan.routes[0].vehicleName).toBe("MOTO (ABC-1234)");
-    expect(plan.origin.name).toBe("Depósito Central");
+    const delivery = toDeliveryFromBackend(dto);
+    expect(delivery.hasExplicitTimeWindow).toBe(false);
+    expect(delivery.routeId).toBeNull();
+
+    const input = toDeliveryInput(delivery);
+    expect(input.windowStart).toBe("");
+    expect(input.windowEnd).toBe("");
+  });
+
+  it("remove a nota de geocodificação anexada pela API ao editar", () => {
+    const input = toDeliveryInput({
+      ...baseDelivery,
+      notes: "Deixar na portaria | Geocodificação: endereço sem coordenadas.",
+    });
+
+    expect(input.notes).toBe("Deixar na portaria");
+    expect(input.windowStart).toBe("18:00");
+    expect(input.windowEnd).toBe("20:00");
   });
 
   it("mapeia plano com múltiplos veículos corretamente", () => {

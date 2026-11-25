@@ -22,6 +22,17 @@ export interface Delivery {
   lng: number;
   windowStart: string;
   windowEnd: string;
+  /**
+   * false = a entrega herdou o expediente da loja; true = janela informada no cadastro.
+   * Opcional: o backend real grava janela vazia como o expediente, sem flag para
+   * distinguir — a integração pode não conseguir preencher este campo.
+   */
+  hasExplicitTimeWindow?: boolean;
+  /**
+   * Vínculo com a rota do backend (`rota_id`). Quando preenchido, a entrega já
+   * faz parte de uma rota otimizada e o cadastro não pode mais ser alterado.
+   */
+  routeId?: string | null;
   priority: Priority;
   status: DeliveryStatus;
   notes: string;

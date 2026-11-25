@@ -1,8 +1,8 @@
 import type { Delivery, NewDelivery, RoutePlan } from "@/types/domain";
+import { isDeliveryEditable } from "@/utils/delivery";
 import { issueLabel } from "@/utils/format";
 import { currentHHmm } from "@/utils/time";
 import type { DeliveriesService } from "../deliveriesService";
-import { DEFAULT_WINDOW_END, DEFAULT_WINDOW_START } from "../mappers";
 import { fakeGeocode } from "./fakeGeocode";
 import { loadDb, recalcRoute, resetDb, saveDb, wait, type MockDb } from "./mockDb";
 
@@ -11,8 +11,7 @@ function build(input: NewDelivery, db: MockDb, position: number): Delivery {
     id: crypto.randomUUID(),
     ...input,
     orderCode: input.orderCode || `#${1001 + db.deliveries.length + position}`,
-    windowStart: input.windowStart.trim() || DEFAULT_WINDOW_START,
-    windowEnd: input.windowEnd.trim() || DEFAULT_WINDOW_END,
+    hasExplicitTimeWindow: input.windowStart.trim() !== "" || input.windowEnd.trim() !== "",
     ...fakeGeocode(input.address, db.route.origin),
     status: "waiting_departure",
     issueReason: null,
@@ -31,11 +30,17 @@ function removeStopFromVehicles(route: RoutePlan, targetId: string): RoutePlan {
   };
 }
 
-function change(id: string, update: (d: Delivery) => Delivery): Delivery {
+/** No mock o vínculo com rota (`routeId`) é derivado das paradas do plano do dia. */
+function routeIdOf(deliveryId: string, db: MockDb): string | null {
+  const linked = db.route.routes.some((r) => r.stopIds.includes(deliveryId));
+  return linked ? db.route.id : null;
+}
+
+function change(id: string, update: (d: Delivery, db: MockDb) => Delivery): Delivery {
   const db = loadDb();
   const current = db.deliveries.find((d) => d.id === id);
   if (!current) throw new Error("Entrega não encontrada.");
-  const updated = update(current);
+  const updated = update(current, db);
   saveDb({ ...db, deliveries: db.deliveries.map((d) => (d.id === id ? updated : d)) });
   return updated;
 }
@@ -43,7 +48,8 @@ function change(id: string, update: (d: Delivery) => Delivery): Delivery {
 export const mockDeliveriesService: DeliveriesService = {
   async list() {
     await wait();
-    return loadDb().deliveries;
+    const db = loadDb();
+    return db.deliveries.map((d) => ({ ...d, routeId: routeIdOf(d.id, db) }));
   },
 
   async create(input) {
@@ -66,6 +72,33 @@ export const mockDeliveriesService: DeliveriesService = {
       deliveries: [...db.deliveries, ...created],
     });
     return created;
+  },
+
+  async update(id, input) {
+    await wait();
+    const origin = loadDb().route.origin;
+    const updated = change(id, (d, db) => {
+      if (!isDeliveryEditable({ ...d, routeId: routeIdOf(d.id, db) })) {
+        throw new Error(
+          "Só é possível editar entregas aguardando — a rota já otimizada não é recalculada.",
+        );
+      }
+      const fixingAddressIssue =
+        d.status === "issue" && d.issueReason === "address_not_found";
+      return {
+        ...d,
+        ...input,
+        orderCode: input.orderCode || d.orderCode,
+        hasExplicitTimeWindow:
+          input.windowStart.trim() !== "" || input.windowEnd.trim() !== "",
+        ...(input.address !== d.address ? fakeGeocode(input.address, origin) : {}),
+        status: fixingAddressIssue ? "waiting_departure" : d.status,
+        issueReason: fixingAddressIssue ? null : d.issueReason,
+        history: [...d.history, { at: currentHHmm(), text: "Pedido editado" }],
+      };
+    });
+    saveDb(recalcRoute(loadDb()));
+    return updated;
   },
 
   async remove(id) {

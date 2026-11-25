@@ -10,6 +10,8 @@ interface DeliveryFormProps {
   onSubmit: (values: NewDelivery) => Promise<void>;
   onCancel: () => void;
   submitting?: boolean;
+  /** Quando informado, o formulário abre preenchido para editar a entrega. */
+  initialValues?: NewDelivery;
 }
 
 const EMPTY: NewDelivery = {
@@ -25,8 +27,9 @@ const EMPTY: NewDelivery = {
 
 type Control = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
-export function DeliveryForm({ onSubmit, onCancel, submitting }: DeliveryFormProps) {
-  const [values, setValues] = useState<NewDelivery>(EMPTY);
+export function DeliveryForm({ onSubmit, onCancel, submitting, initialValues }: DeliveryFormProps) {
+  const editing = initialValues !== undefined;
+  const [values, setValues] = useState<NewDelivery>(initialValues ?? EMPTY);
   const [errors, setErrors] = useState<FieldErrors>({});
 
   const change = (field: keyof NewDelivery) => (event: ChangeEvent<Control>) => {
@@ -55,7 +58,9 @@ export function DeliveryForm({ onSubmit, onCancel, submitting }: DeliveryFormPro
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-900">Cadastrar nova entrega</h2>
+        <h2 className="text-lg font-semibold text-slate-900">
+          {editing ? "Editar entrega" : "Cadastrar nova entrega"}
+        </h2>
         <span className="text-xs text-slate-500">* Campos obrigatórios</span>
       </div>
 
@@ -170,7 +175,7 @@ export function DeliveryForm({ onSubmit, onCancel, submitting }: DeliveryFormPro
           Cancelar
         </Button>
         <Button type="submit" disabled={submitting}>
-          {submitting ? "Salvando..." : "Salvar entrega"}
+          {submitting ? "Salvando..." : editing ? "Salvar alterações" : "Salvar entrega"}
         </Button>
       </div>
     </form>
