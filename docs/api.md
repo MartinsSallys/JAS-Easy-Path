@@ -170,7 +170,10 @@ Edição permitida apenas enquanto a entrega está `waiting_departure`: depois q
 ### 3.5. Remover entrega
 `DELETE /deliveries/{id}`
 
+> **Mapeamento para o backend real:** `DELETE /api/v1/entregas/{id}` faz soft delete (`status = CANCELADA`). Se a entrega está vinculada a uma rota, a `Parada` correspondente é removida do plano na mesma chamada — `rota_id` é preservado como histórico e a entrega não volta ao solver na próxima reotimização.
+
 **Resposta `204 No Content`:** Entrega removida com sucesso (corpo vazio).
+**Resposta `409 Conflict`:** A entrega está em andamento (`EM_ROTA`) ou concluída (`ENTREGUE`) — estados operacionais fazem parte do histórico e não podem ser removidos.
 
 ---
 

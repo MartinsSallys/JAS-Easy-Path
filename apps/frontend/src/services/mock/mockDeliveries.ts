@@ -104,6 +104,14 @@ export const mockDeliveriesService: DeliveriesService = {
   async remove(id) {
     await wait();
     const db = loadDb();
+    const target = db.deliveries.find((d) => d.id === id);
+    // Mesma regra do DELETE /entregas/{id}: estados operacionais são
+    // histórico. Entrega vinculada pode ser removida — a parada sai da rota.
+    if (target?.status === "in_progress" || target?.status === "completed") {
+      throw new Error(
+        "Entrega em andamento ou concluída não pode ser excluída — faz parte do histórico da rota.",
+      );
+    }
     saveDb(
       recalcRoute({
         deliveries: db.deliveries.filter((d) => d.id !== id),

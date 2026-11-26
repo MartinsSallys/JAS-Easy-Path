@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
-from app.models import Entrega
+from app.models import Entrega, Parada
 from app.schemas import (
     EntregaBatchCreate,
     EntregaCreate,
@@ -105,5 +105,20 @@ async def delete_entrega(
     if not entrega:
         raise HTTPException(status_code=404, detail="Entrega não encontrada")
 
+    if entrega.status in (EntregaStatus.EM_ROTA, EntregaStatus.ENTREGUE):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Entrega em andamento ou concluída não pode ser excluída "
+                "— faz parte do histórico da rota"
+            ),
+        )
+
     entrega.status = EntregaStatus.CANCELADA
+    entrega.parada_ordem = None
+    # Remove a parada do plano otimizado: sem isso a rota continuaria
+    # exibindo uma parada de entrega cancelada até a próxima reotimização.
+    await session.execute(
+        Parada.__table__.delete().where(Parada.entrega_id == entrega.id)
+    )
     await session.commit()
