@@ -21,7 +21,7 @@ const NOT_EDITABLE_HINT =
   "Edição disponível só para entregas aguardando — alterar o cadastro não recalcula a rota já otimizada.";
 
 const NOT_DELETABLE_HINT =
-  "Exclusão indisponível para entregas em andamento ou concluídas — elas fazem parte do histórico da rota.";
+  "Exclusão indisponível para entregas em andamento, concluídas ou com pendência — elas fazem parte do histórico da rota.";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "Todas" },

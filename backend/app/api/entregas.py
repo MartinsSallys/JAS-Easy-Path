@@ -105,12 +105,16 @@ async def delete_entrega(
     if not entrega:
         raise HTTPException(status_code=404, detail="Entrega não encontrada")
 
-    if entrega.status in (EntregaStatus.EM_ROTA, EntregaStatus.ENTREGUE):
+    if entrega.status in (
+        EntregaStatus.EM_ROTA,
+        EntregaStatus.ENTREGUE,
+        EntregaStatus.FALHA,
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "Entrega em andamento ou concluída não pode ser excluída "
-                "— faz parte do histórico da rota"
+                "Entrega em andamento, concluída ou com falha não pode ser "
+                "excluída — faz parte do histórico da rota"
             ),
         )
 

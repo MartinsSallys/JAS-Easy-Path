@@ -171,4 +171,17 @@ describe("mockDeliveriesService.remove — regra de exclusão por vínculo", () 
     const persisted = JSON.parse(store.get(STORAGE_KEY)!) as MockDb;
     expect(persisted.deliveries).toHaveLength(1);
   });
+
+  it("rejeita exclusão de entrega com pendência (FALHA)", async () => {
+    // Mesma regra do backend: ocorrência registrada é histórico operacional
+    seedDb([{ ...baseDelivery, status: "issue", issueReason: "customer_absent" }]);
+
+    await expect(mockDeliveriesService.remove("del-1")).rejects.toThrow(
+      "não pode ser excluída",
+    );
+
+    const persisted = JSON.parse(store.get(STORAGE_KEY)!) as MockDb;
+    expect(persisted.deliveries).toHaveLength(1);
+    expect(persisted.deliveries[0].status).toBe("issue");
+  });
 });

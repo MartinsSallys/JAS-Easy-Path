@@ -107,9 +107,13 @@ export const mockDeliveriesService: DeliveriesService = {
     const target = db.deliveries.find((d) => d.id === id);
     // Mesma regra do DELETE /entregas/{id}: estados operacionais são
     // histórico. Entrega vinculada pode ser removida — a parada sai da rota.
-    if (target?.status === "in_progress" || target?.status === "completed") {
+    if (
+      target?.status === "in_progress" ||
+      target?.status === "completed" ||
+      target?.status === "issue"
+    ) {
       throw new Error(
-        "Entrega em andamento ou concluída não pode ser excluída — faz parte do histórico da rota.",
+        "Entrega em andamento, concluída ou com pendência não pode ser excluída — faz parte do histórico da rota.",
       );
     }
     saveDb(

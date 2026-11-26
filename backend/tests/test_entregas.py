@@ -276,11 +276,11 @@ async def test_excluir_entrega_vinculada_remove_parada(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["EM_ROTA", "ENTREGUE"])
+@pytest.mark.parametrize("status", ["EM_ROTA", "ENTREGUE", "FALHA"])
 async def test_excluir_entrega_em_operacao_rejeita(
     client: AsyncClient, status: str
 ) -> None:
-    """Entrega em andamento ou concluída é histórico: não pode ser excluída."""
+    """Entrega em andamento, concluída ou com falha é histórico: não pode ser excluída."""
     entrega = await _create_entrega(client)
     update = await client.put(
         f"{API}/entregas/{entrega['id']}", json={"status": status}
