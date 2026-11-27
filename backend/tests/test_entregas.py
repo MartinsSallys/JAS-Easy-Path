@@ -1,6 +1,7 @@
 """Validação de janela de entrega no cadastro e na atualização de entregas."""
 
 from collections.abc import AsyncIterator
+from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -17,7 +18,11 @@ from app.main import app
 API = "/api/v1"
 HTTP_OK = 200
 HTTP_CREATED = 201
+HTTP_NO_CONTENT = 204
+HTTP_NOT_FOUND = 404
+HTTP_CONFLICT = 409
 HTTP_UNPROCESSABLE = 422
+OPTIMIZE_TIME_LIMIT = 5
 
 
 @pytest.fixture
@@ -67,6 +72,41 @@ async def _create_entrega(client: AsyncClient, **extra: object) -> dict:
     )
     assert response.status_code == HTTP_CREATED
     return response.json()
+
+
+async def _vincular_entrega_a_rota(
+    client: AsyncClient, entrega_id: int
+) -> int:
+    """Cria depósito, veículo e rota contendo a entrega; devolve o rota_id."""
+    deposito = await client.post(
+        f"{API}/depositos",
+        json={
+            "nome": "CD Central",
+            "endereco": "Av. Depot, 100",
+            "latitude": -23.5617,
+            "longitude": -46.6560,
+        },
+    )
+    assert deposito.status_code == HTTP_CREATED
+
+    veiculo = await client.post(
+        f"{API}/veiculos",
+        json={"placa": "ABC1234", "capacidade": 20, "tipo": "CAMINHAO"},
+    )
+    assert veiculo.status_code == HTTP_CREATED
+
+    rota = await client.post(
+        f"{API}/rotas",
+        json={
+            "nome": "Rota Teste",
+            "data": date.today().isoformat(),
+            "deposito_id": deposito.json()["id"],
+            "veiculo_id": veiculo.json()["id"],
+            "entrega_ids": [entrega_id],
+        },
+    )
+    assert rota.status_code == HTTP_CREATED
+    return rota.json()["id"]
 
 
 @pytest.mark.asyncio
@@ -175,3 +215,80 @@ async def test_limpar_janela_inteira(client: AsyncClient) -> None:
     assert response.status_code == HTTP_OK
     assert response.json()["janela_inicio"] is None
     assert response.json()["janela_fim"] is None
+
+
+@pytest.mark.asyncio
+async def test_excluir_entrega_pendente_marca_cancelada(
+    client: AsyncClient,
+) -> None:
+    """Soft delete: a entrega permanece no banco com status CANCELADA."""
+    entrega = await _create_entrega(client)
+
+    response = await client.delete(f"{API}/entregas/{entrega['id']}")
+
+    assert response.status_code == HTTP_NO_CONTENT
+    persisted = await client.get(f"{API}/entregas/{entrega['id']}")
+    assert persisted.json()["status"] == "CANCELADA"
+
+
+@pytest.mark.asyncio
+async def test_excluir_entrega_inexistente_retorna_404(
+    client: AsyncClient,
+) -> None:
+    response = await client.delete(f"{API}/entregas/999")
+
+    assert response.status_code == HTTP_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_excluir_entrega_vinculada_remove_parada(
+    client: AsyncClient,
+) -> None:
+    """Cancelar entrega de rota otimizada remove a parada na hora: sem isso
+    o plano continuaria exibindo uma parada de entrega cancelada."""
+    entrega = await _create_entrega(client)
+    rota_id = await _vincular_entrega_a_rota(client, entrega["id"])
+
+    otimizar = await client.post(
+        f"{API}/rotas/{rota_id}/otimizar",
+        json={"time_limit_seconds": OPTIMIZE_TIME_LIMIT},
+    )
+    assert otimizar.status_code == HTTP_OK
+    assert any(
+        p["entrega_id"] == entrega["id"] for p in otimizar.json()["paradas"]
+    )
+
+    response = await client.delete(f"{API}/entregas/{entrega['id']}")
+
+    assert response.status_code == HTTP_NO_CONTENT
+
+    persisted = await client.get(f"{API}/entregas/{entrega['id']}")
+    assert persisted.json()["status"] == "CANCELADA"
+    # rota_id é preservado como histórico; só o vínculo com a parada é limpo
+    assert persisted.json()["rota_id"] == rota_id
+    assert persisted.json()["parada_ordem"] is None
+
+    rota = await client.get(f"{API}/rotas/{rota_id}")
+    assert rota.status_code == HTTP_OK
+    assert all(
+        p["entrega_id"] != entrega["id"] for p in rota.json()["paradas"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["EM_ROTA", "ENTREGUE", "FALHA"])
+async def test_excluir_entrega_em_operacao_rejeita(
+    client: AsyncClient, status: str
+) -> None:
+    """Entrega em andamento, concluída ou com falha é histórico: não pode ser excluída."""
+    entrega = await _create_entrega(client)
+    update = await client.put(
+        f"{API}/entregas/{entrega['id']}", json={"status": status}
+    )
+    assert update.status_code == HTTP_OK
+
+    response = await client.delete(f"{API}/entregas/{entrega['id']}")
+
+    assert response.status_code == HTTP_CONFLICT
+    persisted = await client.get(f"{API}/entregas/{entrega['id']}")
+    assert persisted.json()["status"] == status

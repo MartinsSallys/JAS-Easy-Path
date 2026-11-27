@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Delivery } from "@/types/domain";
-import { isDeliveryEditable } from "./delivery";
+import { isDeliveryDeletable, isDeliveryEditable } from "./delivery";
 
 const base: Delivery = {
   id: "del-1",
@@ -64,5 +64,23 @@ describe("isDeliveryEditable", () => {
   it("permite editar quando o vínculo de rota está ausente ou nulo", () => {
     expect(isDeliveryEditable({ ...base, routeId: null })).toBe(true);
     expect(isDeliveryEditable({ ...base, routeId: undefined })).toBe(true);
+  });
+});
+
+describe("isDeliveryDeletable", () => {
+  it("permite excluir entrega aguardando", () => {
+    expect(isDeliveryDeletable({ ...base, status: "waiting_departure" })).toBe(true);
+  });
+
+  it("permite excluir entrega vinculada a uma rota", () => {
+    // O backend cancela e remove a parada do plano na mesma chamada
+    expect(isDeliveryDeletable({ ...base, routeId: "7" })).toBe(true);
+  });
+
+  it("bloqueia entrega em andamento, concluída ou com pendência", () => {
+    // Estados operacionais são histórico da rota — o backend rejeita com 409
+    expect(isDeliveryDeletable({ ...base, status: "in_progress" })).toBe(false);
+    expect(isDeliveryDeletable({ ...base, status: "completed" })).toBe(false);
+    expect(isDeliveryDeletable({ ...base, status: "issue" })).toBe(false);
   });
 });

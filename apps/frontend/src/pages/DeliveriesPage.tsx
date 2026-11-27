@@ -4,7 +4,7 @@ import type { Delivery, DeliveryStatus, NewDelivery } from "@/types/domain";
 import { useNow } from "@/hooks/useNow";
 import { useAppStore } from "@/store/useAppStore";
 import { toDeliveryInput } from "@/services/mappers";
-import { isDeliveryEditable } from "@/utils/delivery";
+import { isDeliveryDeletable, isDeliveryEditable } from "@/utils/delivery";
 import { issueLabel, priorityLabel } from "@/utils/format";
 import { isLate } from "@/utils/kpis";
 import { Badge } from "@/components/ui/Badge";
@@ -19,6 +19,9 @@ type Filter = "all" | "late" | DeliveryStatus;
 
 const NOT_EDITABLE_HINT =
   "Edição disponível só para entregas aguardando — alterar o cadastro não recalcula a rota já otimizada.";
+
+const NOT_DELETABLE_HINT =
+  "Exclusão indisponível para entregas em andamento, concluídas ou com pendência — elas fazem parte do histórico da rota.";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "Todas" },
@@ -255,8 +258,10 @@ const handleCreate = async (input: NewDelivery) => {
                       <button
                         type="button"
                         onClick={() => void handleRemove(d)}
+                        disabled={!isDeliveryDeletable(d)}
+                        title={isDeliveryDeletable(d) ? undefined : NOT_DELETABLE_HINT}
                         aria-label={`Excluir entrega ${d.orderCode}`}
-                        className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>

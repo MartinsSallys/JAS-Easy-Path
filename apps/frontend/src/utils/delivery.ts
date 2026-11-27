@@ -16,3 +16,16 @@ export function isDeliveryEditable(d: Delivery): boolean {
     (d.status === "issue" && d.issueReason === "address_not_found")
   );
 }
+
+/**
+ * Excluir só é bloqueada para estados operacionais (issue #4): entrega
+ * em andamento, concluída ou com pendência (FALHA no backend) faz parte
+ * do histórico da rota e o backend rejeita com 409. Entrega vinculada a
+ * rota PODE ser cancelada — o backend remove a parada do plano otimizado
+ * na mesma chamada.
+ */
+export function isDeliveryDeletable(d: Delivery): boolean {
+  return (
+    d.status !== "in_progress" && d.status !== "completed" && d.status !== "issue"
+  );
+}
