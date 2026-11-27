@@ -35,9 +35,10 @@ export default function RoutePage() {
     [deliveries, activeRoute],
   );
 
-if (!initialized) {
-  return <p className="text-sm text-slate-500">Carregando plano de rota...</p>;
-}
+  if (!initialized) {
+    return <p className="text-sm text-slate-500">Carregando plano de rota...</p>;
+  }
+
   const hasRoutes = !!route && route.routes.length > 0;
   const hasDeliveries = deliveries.length > 0;
   const pendingStops = stops.filter(needsVisit);
@@ -63,10 +64,10 @@ if (!initialized) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-bold text-slate-900">Rota do dia</h1>
+            <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Rota do dia</h1>
             {route?.isSimulation ? (
               <Badge tone="orange">Sequência estimada / simulada</Badge>
             ) : null}
@@ -82,12 +83,13 @@ if (!initialized) {
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2">
-        <Button
-            variant={hasRoutes ? "secondary" : "primary"} 
-            onClick={() => void handleOptimize()} 
-            disabled={loading || !hasDeliveries}>
-            <Sparkles className={`h-4 w-4 ${hasRoutes ? "text-blue-600" : "text-white"}`} />
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+          <Button
+            variant={hasRoutes ? "secondary" : "primary"}
+            onClick={() => void handleOptimize()}
+            disabled={loading || !hasDeliveries}
+          >
+            <Sparkles className={`h-4 w-4 shrink-0 ${hasRoutes ? "text-blue-600" : "text-white"}`} />
             {loading
               ? "Otimizando rota..."
               : hasRoutes
@@ -97,7 +99,7 @@ if (!initialized) {
 
           {hasRoutes ? (
             <Button variant="secondary" onClick={() => void handleShare()}>
-              <Share2 className="h-4 w-4" />
+              <Share2 className="h-4 w-4 shrink-0" />
               Compartilhar rota
             </Button>
           ) : null}
@@ -109,7 +111,7 @@ if (!initialized) {
               rel="noreferrer"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
             >
-              <ExternalLink className="h-4 w-4" />
+              <ExternalLink className="h-4 w-4 shrink-0" />
               Abrir no Google Maps
             </a>
           ) : null}
@@ -163,8 +165,8 @@ if (!initialized) {
           </div>
 
           {shareUrl ? (
-            <Card className="flex flex-wrap items-center justify-between gap-3 border-blue-200 bg-blue-50/60">
-              <div className="space-y-0.5 text-xs">
+            <Card className="flex flex-col gap-3 border-blue-200 bg-blue-50/60 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 space-y-0.5 text-xs">
                 <p className="font-semibold text-blue-950">Link para o entregador:</p>
                 <p className="font-mono text-blue-800 break-all">{shareUrl}</p>
                 {USE_MOCK ? (
@@ -179,7 +181,7 @@ if (!initialized) {
                   void navigator.clipboard.writeText(shareUrl);
                   setCopied(true);
                 }}
-                className="min-h-9 px-3 text-xs"
+                className="min-h-9 shrink-0 px-3 text-xs"
               >
                 {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? "Copiado" : "Copiar link"}
@@ -195,17 +197,17 @@ if (!initialized) {
 
           {activeRoute ? (
             <div className="grid gap-6 lg:grid-cols-5">
-              <div className="space-y-2 lg:col-span-3">
+              <div className="min-w-0 space-y-2 lg:col-span-3">
                 <RouteMap origin={route.origin} stops={stops} />
                 <p className="text-xs text-slate-500">
-                  * As linhas tracejadas ligam as paradas na ordem de visita (linha reta ilustrativa).
+                  As linhas tracejadas ligam as paradas na ordem de visita (linha reta ilustrativa).
                 </p>
               </div>
 
-              <div className="space-y-3 lg:col-span-2">
-                <Card className="flex items-center justify-between bg-slate-900 text-white">
-                  <div>
-                    <p className="text-xs text-slate-400">{activeRoute.vehicleName}</p>
+              <div className="min-w-0 space-y-3 lg:col-span-2">
+                <Card className="flex items-center justify-between gap-2 bg-slate-900 text-white">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs text-slate-400">{activeRoute.vehicleName}</p>
                     <p className="text-lg font-bold">
                       {activeRoute.distanceKm} km · {activeRoute.durationMin} min
                     </p>
@@ -229,13 +231,16 @@ if (!initialized) {
                         <li key={stop.id}>
                           <Card className="space-y-2 p-3.5">
                             <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-start gap-2.5">
+                              <div className="flex min-w-0 items-start gap-2.5">
                                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
                                   {idx + 1}
                                 </span>
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-900">
-                                    {stop.customerName} <span className="font-mono text-xs text-slate-400">{stop.orderCode}</span>
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-slate-900">
+                                    {stop.customerName}{" "}
+                                    <span className="font-mono text-xs text-slate-400">
+                                      {stop.orderCode}
+                                    </span>
                                   </p>
                                   <p className="text-xs text-slate-600">{stop.address}</p>
                                 </div>
