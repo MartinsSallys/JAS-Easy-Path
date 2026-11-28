@@ -96,6 +96,11 @@ class Entrega(Base):
     status: Mapped[EntregaStatus] = mapped_column(
         SQLEnum(EntregaStatus), default=EntregaStatus.PENDENTE, index=True
     )
+    # Último status antes da transição atual (issue #32): distingue, por
+    # exemplo, CANCELADA antes de sair de CANCELADA após ocorrência (FALHA).
+    status_anterior: Mapped[EntregaStatus | None] = mapped_column(
+        SQLEnum(EntregaStatus), nullable=True
+    )
     observacoes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

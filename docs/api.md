@@ -171,9 +171,11 @@ Edição permitida apenas enquanto a entrega está `waiting_departure`: depois q
 `DELETE /deliveries/{id}`
 
 > **Mapeamento para o backend real:** `DELETE /api/v1/entregas/{id}` faz soft delete (`status = CANCELADA`). Se a entrega está vinculada a uma rota, a `Parada` correspondente é removida do plano na mesma chamada — `rota_id` é preservado como histórico e a entrega não volta ao solver na próxima reotimização.
+>
+> **Cancelamento de entrega com falha (issue #32):** uma entrega `FALHA` também pode ser cancelada — ela vira `CANCELADA` com `status_anterior = "FALHA"`, e o motivo da ocorrência permanece em `observacoes`. Assim `status_anterior` distingue "cancelada antes de sair" (`PENDENTE`/`ATRIBUIDA`) de "cancelada após ocorrência" (`FALHA`), e toda mudança de status via `PUT` também grava o status anterior.
 
 **Resposta `204 No Content`:** Entrega removida com sucesso (corpo vazio).
-**Resposta `409 Conflict`:** A entrega está em andamento (`EM_ROTA`), concluída (`ENTREGUE`) ou com falha registrada (`FALHA`) — estados operacionais fazem parte do histórico e não podem ser removidos.
+**Resposta `409 Conflict`:** A entrega está em andamento (`EM_ROTA`) ou concluída (`ENTREGUE`) — estados operacionais em curso fazem parte do histórico e não podem ser removidos.
 
 ---
 

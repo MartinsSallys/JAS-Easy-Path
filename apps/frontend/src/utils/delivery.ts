@@ -18,14 +18,13 @@ export function isDeliveryEditable(d: Delivery): boolean {
 }
 
 /**
- * Excluir só é bloqueada para estados operacionais (issue #4): entrega
- * em andamento, concluída ou com pendência (FALHA no backend) faz parte
- * do histórico da rota e o backend rejeita com 409. Entrega vinculada a
- * rota PODE ser cancelada — o backend remove a parada do plano otimizado
- * na mesma chamada.
+ * Excluir só é bloqueada para estados operacionais em curso (issues #4 e
+ * #32): entrega em andamento ou concluída faz parte do histórico da rota
+ * e o backend rejeita com 409. Entrega vinculada a rota PODE ser cancelada
+ * — o backend remove a parada do plano otimizado na mesma chamada — e
+ * entrega com pendência (FALHA) também pode: vira CANCELADA preservando
+ * o motivo em `observacoes` e a transição em `status_anterior`.
  */
 export function isDeliveryDeletable(d: Delivery): boolean {
-  return (
-    d.status !== "in_progress" && d.status !== "completed" && d.status !== "issue"
-  );
+  return d.status !== "in_progress" && d.status !== "completed";
 }
