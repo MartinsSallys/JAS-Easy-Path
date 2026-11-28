@@ -105,15 +105,13 @@ export const mockDeliveriesService: DeliveriesService = {
     await wait();
     const db = loadDb();
     const target = db.deliveries.find((d) => d.id === id);
-    // Mesma regra do DELETE /entregas/{id}: estados operacionais são
-    // histórico. Entrega vinculada pode ser removida — a parada sai da rota.
-    if (
-      target?.status === "in_progress" ||
-      target?.status === "completed" ||
-      target?.status === "issue"
-    ) {
+    // Mesma regra do DELETE /entregas/{id} (issue #32): só estados
+    // operacionais em curso são bloqueados. Entrega com pendência pode
+    // ser cancelada — o backend preserva o motivo e registra a transição
+    // FALHA -> CANCELADA; aqui o registro some da lista, como na API.
+    if (target?.status === "in_progress" || target?.status === "completed") {
       throw new Error(
-        "Entrega em andamento, concluída ou com pendência não pode ser excluída — faz parte do histórico da rota.",
+        "Entrega em andamento ou concluída não pode ser excluída — faz parte do histórico da rota.",
       );
     }
     saveDb(

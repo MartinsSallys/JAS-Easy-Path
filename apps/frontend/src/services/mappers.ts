@@ -290,7 +290,11 @@ export function toDeliveryFromBackend(dto: BackendEntregaResponseDTO): Delivery 
   if (dto.updated_at && dto.updated_at !== dto.created_at) {
     history.push({
       at: wallClockHHmm(dto.updated_at),
-      text: BACKEND_STATUS_LABEL[dto.status],
+      // CANCELADA após FALHA preserva a ocorrência no rótulo (issue #32).
+      text:
+        dto.status === "CANCELADA" && dto.status_anterior === "FALHA"
+          ? "Cancelada após pendência registrada"
+          : BACKEND_STATUS_LABEL[dto.status],
     });
   }
 

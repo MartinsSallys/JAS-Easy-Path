@@ -133,6 +133,7 @@ class EntregaResponse(EntregaBase):
 
     id: int
     status: EntregaStatus
+    status_anterior: EntregaStatus | None = None
     created_at: datetime
     updated_at: datetime
     rota_id: int | None = None

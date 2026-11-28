@@ -13,6 +13,7 @@ const mockBackendEntrega: BackendEntregaResponseDTO = {
   janela_fim: "18:00:00",
   observacoes: '\n[JAS_META]:{"c":"Ana Paula","p":"71999990000"}',
   status: "PENDENTE",
+  status_anterior: null,
   created_at: "2026-11-23T08:00:00",
   updated_at: "2026-11-23T08:00:00",
   rota_id: null,

@@ -82,6 +82,10 @@ async def update_entrega(
         raise HTTPException(status_code=404, detail="Entrega não encontrada")
 
     update_data = entrega_update.model_dump(exclude_unset=True)
+    novo_status = update_data.get("status")
+    if novo_status is not None and novo_status != entrega.status:
+        # Registra a última transição para preservar o histórico (issue #32).
+        entrega.status_anterior = entrega.status
     for field, value in update_data.items():
         setattr(entrega, field, value)
 
@@ -105,19 +109,19 @@ async def delete_entrega(
     if not entrega:
         raise HTTPException(status_code=404, detail="Entrega não encontrada")
 
-    if entrega.status in (
-        EntregaStatus.EM_ROTA,
-        EntregaStatus.ENTREGUE,
-        EntregaStatus.FALHA,
-    ):
+    # FALHA pode ser cancelada (issue #32): o motivo da ocorrência fica
+    # preservado em `observacoes` e `status_anterior` registra a transição
+    # FALHA -> CANCELADA. Só EM_ROTA e ENTREGUE continuam bloqueadas.
+    if entrega.status in (EntregaStatus.EM_ROTA, EntregaStatus.ENTREGUE):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "Entrega em andamento, concluída ou com falha não pode ser "
-                "excluída — faz parte do histórico da rota"
+                "Entrega em andamento ou concluída não pode ser excluída — "
+                "faz parte do histórico da rota"
             ),
         )
 
+    entrega.status_anterior = entrega.status
     entrega.status = EntregaStatus.CANCELADA
     entrega.parada_ordem = None
     # Remove a parada do plano otimizado: sem isso a rota continuaria

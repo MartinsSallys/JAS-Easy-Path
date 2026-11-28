@@ -276,11 +276,11 @@ async def test_excluir_entrega_vinculada_remove_parada(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["EM_ROTA", "ENTREGUE", "FALHA"])
+@pytest.mark.parametrize("status", ["EM_ROTA", "ENTREGUE"])
 async def test_excluir_entrega_em_operacao_rejeita(
     client: AsyncClient, status: str
 ) -> None:
-    """Entrega em andamento, concluída ou com falha é histórico: não pode ser excluída."""
+    """Entrega em andamento ou concluída é histórico: não pode ser excluída."""
     entrega = await _create_entrega(client)
     update = await client.put(
         f"{API}/entregas/{entrega['id']}", json={"status": status}
@@ -292,3 +292,56 @@ async def test_excluir_entrega_em_operacao_rejeita(
     assert response.status_code == HTTP_CONFLICT
     persisted = await client.get(f"{API}/entregas/{entrega['id']}")
     assert persisted.json()["status"] == status
+
+
+@pytest.mark.asyncio
+async def test_excluir_entrega_com_falha_cancela_preservando_historico(
+    client: AsyncClient,
+) -> None:
+    """Issue #32: FALHA pode ser cancelada — o motivo em `observacoes` é
+    preservado e `status_anterior` registra a transição FALHA -> CANCELADA."""
+    observacoes_falha = 'Cliente ausente\n[JAS_META]:{"r": "customer_absent"}'
+    entrega = await _create_entrega(client)
+    update = await client.put(
+        f"{API}/entregas/{entrega['id']}",
+        json={"status": "FALHA", "observacoes": observacoes_falha},
+    )
+    assert update.status_code == HTTP_OK
+
+    response = await client.delete(f"{API}/entregas/{entrega['id']}")
+
+    assert response.status_code == HTTP_NO_CONTENT
+    persisted = await client.get(f"{API}/entregas/{entrega['id']}")
+    assert persisted.json()["status"] == "CANCELADA"
+    assert persisted.json()["status_anterior"] == "FALHA"
+    assert persisted.json()["observacoes"] == observacoes_falha
+
+
+@pytest.mark.asyncio
+async def test_excluir_entrega_pendente_registra_status_anterior(
+    client: AsyncClient,
+) -> None:
+    """Cancelada antes de sair: status_anterior marca o status pré-cancelamento."""
+    entrega = await _create_entrega(client)
+
+    response = await client.delete(f"{API}/entregas/{entrega['id']}")
+
+    assert response.status_code == HTTP_NO_CONTENT
+    persisted = await client.get(f"{API}/entregas/{entrega['id']}")
+    assert persisted.json()["status"] == "CANCELADA"
+    assert persisted.json()["status_anterior"] == "PENDENTE"
+
+
+@pytest.mark.asyncio
+async def test_atualizar_status_registra_status_anterior(
+    client: AsyncClient,
+) -> None:
+    """Toda mudança de status via PUT preserva o status anterior."""
+    entrega = await _create_entrega(client)
+
+    update = await client.put(
+        f"{API}/entregas/{entrega['id']}", json={"status": "FALHA"}
+    )
+
+    assert update.status_code == HTTP_OK
+    assert update.json()["status_anterior"] == "PENDENTE"

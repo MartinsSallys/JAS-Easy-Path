@@ -77,10 +77,19 @@ describe("isDeliveryDeletable", () => {
     expect(isDeliveryDeletable({ ...base, routeId: "7" })).toBe(true);
   });
 
-  it("bloqueia entrega em andamento, concluída ou com pendência", () => {
-    // Estados operacionais são histórico da rota — o backend rejeita com 409
+  it("bloqueia entrega em andamento ou concluída", () => {
+    // Estados operacionais em curso são histórico da rota — o backend rejeita com 409
     expect(isDeliveryDeletable({ ...base, status: "in_progress" })).toBe(false);
     expect(isDeliveryDeletable({ ...base, status: "completed" })).toBe(false);
-    expect(isDeliveryDeletable({ ...base, status: "issue" })).toBe(false);
+  });
+
+  it("permite cancelar entrega com pendência (issue #32)", () => {
+    // O backend converte FALHA em CANCELADA preservando motivo e status_anterior
+    expect(
+      isDeliveryDeletable({ ...base, status: "issue", issueReason: "customer_absent" }),
+    ).toBe(true);
+    expect(
+      isDeliveryDeletable({ ...base, status: "issue", issueReason: "address_not_found" }),
+    ).toBe(true);
   });
 });

@@ -167,6 +167,7 @@ export interface BackendEntregaResponseDTO {
   janela_fim: string | null;
   observacoes: string | null;
   status: BackendEntregaStatus;
+  status_anterior: BackendEntregaStatus | null;
   created_at: string;
   updated_at: string;
   rota_id: number | null;
