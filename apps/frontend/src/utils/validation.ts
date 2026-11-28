@@ -5,6 +5,24 @@ export type FieldErrors = Partial<Record<keyof NewDelivery, string>>;
 
 const MIN_WINDOW_MINUTES = 8;
 
+/** Formata telefone brasileiro (10 ou 11 dígitos) enquanto o usuário digita. */
+export function formatBrPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 11);
+  if (digits.length === 0) return "";
+  if (digits.length <= 2) return `(${digits}`;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+/** Retorna true quando o telefone opcional está preenchido e possui DDD + 8 ou 9 dígitos. */
+export function isValidOptionalPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length === 10 || digits.length === 11;
+}
+
 /** Mesma validação para o formulário e para a importação de CSV. */
 export function validateNewDelivery(values: NewDelivery): FieldErrors {
   const errors: FieldErrors = {};
@@ -59,8 +77,8 @@ export function validateNewDelivery(values: NewDelivery): FieldErrors {
     }
   }
 
-  if (values.phone && values.phone.replace(/\D/g, "").length < 10) {
-    errors.phone = "Informe o telefone com DDD.";
+  if (values.phone && !isValidOptionalPhone(values.phone)) {
+    errors.phone = "Informe o telefone com DDD (10 ou 11 dígitos).";
   }
 
   return errors;

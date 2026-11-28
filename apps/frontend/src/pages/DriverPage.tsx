@@ -83,7 +83,7 @@ export default function DriverPage() {
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-5">
       <div className="mx-auto max-w-md space-y-4">
-        <header className="flex items-center justify-between">
+<header className="flex items-center justify-between gap-2">
           <Link
             to="/rota"
             className="inline-flex min-h-10 items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900"
@@ -91,7 +91,14 @@ export default function DriverPage() {
             <ArrowLeft className="h-4 w-4" />
             Voltar ao painel
           </Link>
-          <span className="font-mono text-xs text-slate-500">{now}</span>
+          <div className="flex items-center gap-2">
+            <img
+              src="/logo.png"
+              alt="JAS Easy Path"
+              className="h-7 w-7 rounded-lg object-contain"
+            />
+            <span className="font-mono text-xs text-slate-500">{now}</span>
+          </div>
         </header>
 
         {error ? (

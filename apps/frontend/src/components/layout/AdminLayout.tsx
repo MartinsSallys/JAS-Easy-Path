@@ -26,11 +26,27 @@ export function AdminLayout() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 md:flex">
-      <header className="flex items-center justify-between bg-slate-950 px-4 py-3 text-white md:hidden">
-        <span className="font-bold tracking-tight">JAS Easy Path</span>
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-800/80 bg-slate-950 px-4 py-2.5 text-white md:hidden">
+        <NavLink
+          to="/"
+          onClick={() => setOpen(false)}
+          className="flex items-center gap-2.5"
+        >
+          <img
+            src="/logo.png"
+            alt="Logo JAS Easy Path"
+            className="h-9 w-9 rounded-xl object-contain"
+          />
+          <div className="leading-tight">
+            <span className="block text-sm font-bold tracking-tight">JAS Easy Path</span>
+            <span className="block text-[11px] text-slate-400">Roteirização</span>
+          </div>
+        </NavLink>
+
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
           aria-label={open ? "Fechar menu" : "Abrir menu"}
           className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg hover:bg-slate-800"
         >
@@ -40,14 +56,23 @@ export function AdminLayout() {
 
       <aside
         className={cn(
-          "w-full shrink-0 bg-slate-950 p-4 text-slate-100 md:flex md:w-64 md:flex-col md:justify-between",
+          "w-full shrink-0 border-b border-slate-800 bg-slate-950 p-4 text-slate-100 md:sticky md:top-0 md:flex md:h-screen md:w-64 md:flex-col md:justify-between md:border-b-0 md:border-r",
           open ? "block" : "hidden",
         )}
       >
         <div className="space-y-6">
-          <div className="hidden md:block">
-            <h1 className="text-lg font-bold tracking-tight text-white">JAS Easy Path</h1>
-            <p className="text-xs text-slate-400">Roteirização de entregas</p>
+          <div className="hidden items-center gap-3 md:flex">
+            <img
+              src="/logo.png"
+              alt="Logo JAS Easy Path"
+              className="h-11 w-11 shrink-0 rounded-xl object-contain"
+            />
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-bold tracking-tight text-white">
+                JAS Easy Path
+              </h1>
+              <p className="truncate text-xs text-slate-400">Roteirização de entregas</p>
+            </div>
           </div>
 
           <nav aria-label="Menu principal" className="space-y-1">
@@ -66,7 +91,7 @@ export function AdminLayout() {
                   )
                 }
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-4 w-4 shrink-0" />
                 {label}
               </NavLink>
             ))}
@@ -77,7 +102,7 @@ export function AdminLayout() {
                 onClick={() => setOpen(false)}
                 className="flex min-h-11 items-center gap-3 rounded-lg border border-slate-800 px-3 text-sm text-slate-300 hover:bg-slate-900 hover:text-white"
               >
-                <Smartphone className="h-4 w-4 text-blue-400" />
+                <Smartphone className="h-4 w-4 shrink-0 text-emerald-400" />
                 Visão do entregador
               </NavLink>
             </div>
@@ -99,7 +124,7 @@ export function AdminLayout() {
         </div>
       </aside>
 
-      <main className="flex-1 p-4 sm:p-6 lg:p-8">
+      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
         <div className="mx-auto max-w-6xl space-y-4">
           {loading ? (
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-800">
@@ -110,13 +135,13 @@ export function AdminLayout() {
           {error ? (
             <div
               role="alert"
-              className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
             >
-              <span>{error}</span>
+              <span className="min-w-0 flex-1 break-words">{error}</span>
               <button
                 type="button"
                 onClick={clearError}
-                className="text-xs font-semibold underline hover:text-red-950"
+                className="shrink-0 text-xs font-semibold underline hover:text-red-950"
               >
                 Fechar
               </button>

@@ -55,7 +55,7 @@ export default function DeliveriesPage() {
     return matchesFilter && text.includes(search.trim().toLowerCase());
   });
 
-const handleCreate = async (input: NewDelivery) => {
+  const handleCreate = async (input: NewDelivery) => {
     await addDelivery(input);
     setFeedback("Entrega cadastrada com sucesso.");
     setPanel("none");
@@ -108,13 +108,13 @@ const handleCreate = async (input: NewDelivery) => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Entregas</h1>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Entregas</h1>
           <p className="text-sm text-slate-500">{deliveries.length} pedido(s) cadastrado(s) hoje</p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex">
           <Button
             variant={panel === "csv" ? "primary" : "secondary"}
             onClick={() => {
@@ -122,11 +122,11 @@ const handleCreate = async (input: NewDelivery) => {
               setPanel((p) => (p === "csv" ? "none" : "csv"));
             }}
           >
-            <FileSpreadsheet className="h-4 w-4" />
+            <FileSpreadsheet className="h-4 w-4 shrink-0" />
             Importar CSV
           </Button>
           <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" />
+            <Plus className="h-4 w-4 shrink-0" />
             Nova entrega
           </Button>
         </div>
@@ -135,10 +135,14 @@ const handleCreate = async (input: NewDelivery) => {
       {feedback ? (
         <div
           role="status"
-          className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800"
+          className="flex items-center justify-between gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800"
         >
           <span>{feedback}</span>
-          <button type="button" onClick={() => setFeedback(null)} className="text-xs underline">
+          <button
+            type="button"
+            onClick={() => setFeedback(null)}
+            className="shrink-0 text-xs font-medium underline"
+          >
             Fechar
           </button>
         </div>
@@ -205,53 +209,59 @@ const handleCreate = async (input: NewDelivery) => {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-slate-200 text-xs text-slate-500 uppercase">
-                <tr>
-                  <th className="py-3 pr-3">Pedido</th>
-                  <th className="px-3 py-3">Cliente</th>
-                  <th className="px-3 py-3">Endereço</th>
-                  <th className="px-3 py-3">Janela</th>
-                  <th className="px-3 py-3">Prioridade</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="py-3 pl-3 text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {visible.map((d) => (
-                  <tr
-                    key={d.id}
-                    onClick={() => setSelected(d)}
-                    className="cursor-pointer hover:bg-slate-50"
-                  >
-                    <td className="py-3 pr-3 font-mono text-xs font-semibold text-slate-700">
-                      {d.orderCode}
-                    </td>
-                    <td className="px-3 py-3">
-                      <p className="font-medium text-slate-900">{d.customerName}</p>
+          <>
+            {/* Lista em cards otimizada para celular (< md) */}
+            <div className="space-y-2.5 md:hidden">
+              {visible.map((d) => (
+                <div
+                  key={d.id}
+                  onClick={() => setSelected(d)}
+                  className="cursor-pointer space-y-2.5 rounded-xl border border-slate-200 bg-white p-3.5 transition-colors hover:border-blue-300"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono text-xs font-bold text-slate-700">
+                          {d.orderCode}
+                        </span>
+                        <Badge
+                          tone={
+                            d.priority === "high"
+                              ? "red"
+                              : d.priority === "low"
+                                ? "gray"
+                                : "blue"
+                          }
+                        >
+                          {priorityLabel[d.priority]}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                        {d.customerName}
+                      </p>
                       {d.phone ? <p className="text-xs text-slate-500">{d.phone}</p> : null}
-                    </td>
-                    <td className="px-3 py-3 text-slate-600">{d.address}</td>
-                    <td className="px-3 py-3 font-mono text-xs text-slate-700">
+                    </div>
+                    <StatusBadge delivery={d} now={now} />
+                  </div>
+
+                  <p className="text-xs text-slate-600">{d.address}</p>
+
+                  <div
+                    className="flex items-center justify-between border-t border-slate-100 pt-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <span className="font-mono text-xs text-slate-500">
                       {d.windowStart} – {d.windowEnd}
-                    </td>
-                    <td className="px-3 py-3">
-                      <Badge tone={d.priority === "high" ? "red" : d.priority === "low" ? "gray" : "blue"}>
-                        {priorityLabel[d.priority]}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-3">
-                      <StatusBadge delivery={d} now={now} />
-                    </td>
-                    <td className="py-3 pl-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    </span>
+
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
                         onClick={() => openEdit(d)}
                         disabled={!isDeliveryEditable(d)}
                         title={isDeliveryEditable(d) ? undefined : NOT_EDITABLE_HINT}
                         aria-label={`Editar entrega ${d.orderCode}`}
-                        className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                        className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
@@ -261,29 +271,105 @@ const handleCreate = async (input: NewDelivery) => {
                         disabled={!isDeliveryDeletable(d)}
                         title={isDeliveryDeletable(d) ? undefined : NOT_DELETABLE_HINT}
                         aria-label={`Excluir entrega ${d.orderCode}`}
-                        className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                        className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
-                    </td>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Tabela completa para telas médias e grandes (>= md) */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-slate-200 text-xs text-slate-500 uppercase">
+                  <tr>
+                    <th className="py-3 pr-3">Pedido</th>
+                    <th className="px-3 py-3">Cliente</th>
+                    <th className="px-3 py-3">Endereço</th>
+                    <th className="px-3 py-3">Janela</th>
+                    <th className="px-3 py-3">Prioridade</th>
+                    <th className="px-3 py-3">Status</th>
+                    <th className="py-3 pl-3 text-right">Ações</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {visible.map((d) => (
+                    <tr
+                      key={d.id}
+                      onClick={() => setSelected(d)}
+                      className="cursor-pointer hover:bg-slate-50"
+                    >
+                      <td className="py-3 pr-3 font-mono text-xs font-semibold text-slate-700">
+                        {d.orderCode}
+                      </td>
+                      <td className="px-3 py-3">
+                        <p className="font-medium text-slate-900">{d.customerName}</p>
+                        {d.phone ? <p className="text-xs text-slate-500">{d.phone}</p> : null}
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">{d.address}</td>
+                      <td className="px-3 py-3 font-mono text-xs text-slate-700">
+                        {d.windowStart} – {d.windowEnd}
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge
+                          tone={
+                            d.priority === "high"
+                              ? "red"
+                              : d.priority === "low"
+                                ? "gray"
+                                : "blue"
+                          }
+                        >
+                          {priorityLabel[d.priority]}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-3">
+                        <StatusBadge delivery={d} now={now} />
+                      </td>
+                      <td className="py-3 pl-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => openEdit(d)}
+                          disabled={!isDeliveryEditable(d)}
+                          title={isDeliveryEditable(d) ? undefined : NOT_EDITABLE_HINT}
+                          aria-label={`Editar entrega ${d.orderCode}`}
+                          className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleRemove(d)}
+                          disabled={!isDeliveryDeletable(d)}
+                          title={isDeliveryDeletable(d) ? undefined : NOT_DELETABLE_HINT}
+                          aria-label={`Excluir entrega ${d.orderCode}`}
+                          className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Card>
 
       {selected ? (
         <Card className="space-y-3 border-blue-200 bg-blue-50/30">
-          <div className="flex items-start justify-between">
-            <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
               <h2 className="text-base font-semibold text-slate-900">
                 Detalhes do pedido {selected.orderCode} — {selected.customerName}
               </h2>
               <p className="text-xs text-slate-600">{selected.address}</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex shrink-0 gap-2">
               <Button
                 variant="secondary"
                 onClick={() => openEdit(selected)}
@@ -293,7 +379,11 @@ const handleCreate = async (input: NewDelivery) => {
               >
                 Editar
               </Button>
-              <Button variant="secondary" onClick={() => setSelected(null)} className="min-h-9 px-3 text-xs">
+              <Button
+                variant="secondary"
+                onClick={() => setSelected(null)}
+                className="min-h-9 px-3 text-xs"
+              >
                 Fechar
               </Button>
             </div>
